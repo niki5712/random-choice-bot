@@ -1,20 +1,19 @@
 import re
+from collections import Counter, namedtuple
+from datetime import datetime
 from itertools import count
 from time import sleep
-# from collections import namedtuple
 
 import config
+from common import BotException
+from constant.chat import type as chat_type
+from constant.user import first_name
 from log import LOG_BOT
 from telegram_api import TelegramAPI
-from constant.user import first_name
-from constant.chat import type as chat_type
-from datetime import datetime
-from common import BotException
-from collections import Counter
 
 
-# TODO: уметь обновить active_channel_post_id налету (можно отредактировать соответствующий пост)
-active_channel_post_id = None
+# TODO: уметь обновить active_post_id налету (можно отредактировать соответствующий пост)
+active_post_id = None
 
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
 parameters_of_get_updates = dict()
@@ -31,8 +30,25 @@ CHANNEL_IDS = {-1001496858363, -1496858363, -1001761942943}
 # Chat = namedtuple('Chat', 'id type username')  # TODO: перечислить все поля
 
 
+def get_name(obj):
+    return ' '.join(filter(None, [obj.get('first_name'), obj.get('last_name')]))
+
+
+class Order(namedtuple(
+        'Order',
+        ['chat_id', 'active_post_id', 'sender_id', 'sender_name', 'sender_username', 'counter', 'text'])):
+    __slots__ = ()
+
+    @property
+    def key(self):
+        return self.chat_id, self.active_post_id, self.sender_id
+
+    def __str__(self):
+        return f'By: {self.sender_name} ({self.sender_username})\n\n{self.counter:0>3}. {self.text}'
+
+
 def process_updates(updates, telegram):
-    global active_channel_post_id
+    global active_post_id
     global count_message
 
     logging = LOG_BOT.getChild('process_updates')
@@ -119,12 +135,12 @@ def process_updates(updates, telegram):
                 )
                 continue
 
-            active_channel_post_id = message.get('forward_from_message_id')
-            if not active_channel_post_id:
+            active_post_id = message.get('forward_from_message_id')
+            if not active_post_id:
                 logging.warn(f"message {message!r}: no forward_from_message_id, Update {update['update_id']} skipped")
                 continue
 
-            logging.debug(f'Active channel post ID is {active_channel_post_id!r}')
+            logging.debug(f'Active channel post ID is {active_post_id!r}')
 
             forward_date = message.get('forward_date')
             if not forward_date:
@@ -137,8 +153,8 @@ def process_updates(updates, telegram):
             logging.info(f'Counter of messages was reset')
             continue
 
-        if not active_channel_post_id:
-            logging.warn(f"no active_channel_post_id {active_channel_post_id!r}, Update {update['update_id']} skipped")
+        if not active_post_id:
+            logging.warn(f"no active_post_id {active_post_id!r}, Update {update['update_id']} skipped")
             continue
 
         # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
@@ -185,11 +201,11 @@ def process_updates(updates, telegram):
                     f"Update {update['update_id']} skipped"
             )
             continue
-        elif reply_to_message_forward_from_message_id != active_channel_post_id:
+        elif reply_to_message_forward_from_message_id != active_post_id:
             logging.warn(
                 f"message.reply_to_message {reply_to_message!r}: "
                     f"forward_from_message_id {reply_to_message_forward_from_message_id!r} != "
-                    f"active_channel_post_id {active_channel_post_id!r}, Update {update['update_id']} skipped"
+                    f"active_post_id {active_post_id!r}, Update {update['update_id']} skipped"
             )
             continue
 
@@ -263,36 +279,49 @@ def process_updates(updates, telegram):
 
         logging.debug(f"message.text is \"{text}\", Update is {update['update_id']}")
 
-        order_text = (text[:dot_whitespace.start()] + text[dot_whitespace.end():]).strip()
-        if not order_text:
-            logging.warn(f"order is empty, Update {update['update_id']} skipped")
+        order = Order(
+            chat_id=None,
+            active_post_id=None,
+            sender_id=None,
+            sender_name=None,
+            sender_username=None,
+            counter=None,
+            text=(text[:dot_whitespace.start()] + text[dot_whitespace.end():]).strip(),
+        )
+
+        if not order.text:
+            logging.warn(f"order.text is empty, Update {update['update_id']} skipped")
             continue
 
-        order_id = message['chat']['id'], active_channel_post_id, message.get('sender_chat', {}).get('id', from_['id'])
+        order = order._replace(
+            chat_id=message['chat']['id'],
+            active_post_id=active_post_id,
+            # FIXME: sender_id: Chat.id (sender_chat.id) может случайно совпасть с User.id (from.id)?
+            sender_id=sender_chat.get('id', from_['id']),
+            sender_name=sender_chat.get('title', get_name(from_)),
+            sender_username=sender_chat.get('username', from_.get('username', '')),
+        )
 
-        sender = sender_chat.get('title', ' '.join(filter(None, [from_['first_name'], from_.get('last_name')])))
-        sender_username = sender_chat.get('username', from_.get('username', ''))
-
-        if order_counter[order_id] >= config.ORDER_LIMIT:
+        if order_counter[order.key] >= config.ORDER_LIMIT:
             chat = (
                 message['chat'].get('title')
-                or ' '.join(filter(None, [message['chat'].get('first_name'), message['chat'].get('last_name')]))
+                or get_name(message['chat'])
                 or message['chat'].get('username')
                 or message['chat']['id']
             )
             logging.warn(
-                f"The number of orders for {sender!r} ({chat!r}) has reached the limit: {config.ORDER_LIMIT!r}, "
-                    f"Update {update['update_id']} skipped"
+                f"The number of orders for {order.sender_name!r} ({chat!r}) has reached the limit: "
+                    f"{config.ORDER_LIMIT!r}, Update {update['update_id']} skipped"
             )
             continue
 
-        order_text = f"By: {sender} ({sender_username})\n\n{next(count_message):0>3}. {order_text}"
+        order = order._replace(counter=next(count_message))
 
         sent_message = telegram.api_call(
             'sendMessage',
             dict(
                 chat_id=message['chat']['id'],
-                text=order_text,
+                text=str(order),
                 disable_notification=True,
                 disable_web_page_preview=True,  # TODO: Что это?
                 reply_to_message_id=reply_to_message['message_id'],
@@ -303,13 +332,13 @@ def process_updates(updates, telegram):
         if not sent_message:
             continue
 
-        order_counter.update([order_id])
-        logging.info(f'Order count: {order_counter[order_id]!r}, order is "{order_text}"')
+        order_counter.update([order.key])
+        logging.info(f'Order count: {order_counter[order.key]!r}, order.text is "{order.text}"')
 
         try:
             telegram.api_call('deleteMessage', dict(chat_id=message['chat']['id'], message_id=message['message_id']))
         except BotException:
-            logging.error(f"Cannot delete message {text!r} from {sender!r}")
+            logging.error(f"Cannot delete message {text!r} from {order.sender_name!r}")
             pass
 
 
