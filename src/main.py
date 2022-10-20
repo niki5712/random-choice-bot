@@ -26,8 +26,6 @@ count_message = count(start=1)
 order_counter = Counter()
 
 GROUP_IDS = {-1001285375423, -1285375423, -1001686234152}
-
-CHANNEL_USERNAMES = {'tt_elijess', 'niki_tmp'}
 CHANNEL_IDS = {-1001496858363, -1496858363, -1001761942943}
 
 # Chat = namedtuple('Chat', 'id type username')  # TODO: перечислить все поля
@@ -93,12 +91,6 @@ def process_updates(updates, telegram):
                         f"type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
                 )
                 continue
-            elif sender_chat.get('username') not in CHANNEL_USERNAMES:
-                logging.warn(
-                    f"message.sender_chat {sender_chat!r}: "
-                        f"username not in CHANNEL_USERNAMES {CHANNEL_USERNAMES!r}, Update {update['update_id']} skipped"
-                )
-                continue
 
             # # TODO: надо проверять??? Кажется нету смысла, аккаунт фейковый всё равно
             # # 'from': {'id': 777000, 'is_bot': False, 'first_name': 'Telegram'}
@@ -124,12 +116,6 @@ def process_updates(updates, telegram):
                 logging.warn(
                     f"message.forward_from_chat {forward_from_chat!r}: "
                         f"type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
-                )
-                continue
-            elif forward_from_chat.get('username') not in CHANNEL_USERNAMES:
-                logging.warn(
-                    f"message.forward_from_chat {forward_from_chat!r}: "
-                        f"username not in CHANNEL_USERNAMES {CHANNEL_USERNAMES!r}, Update {update['update_id']} skipped"
                 )
                 continue
 
@@ -245,12 +231,6 @@ def process_updates(updates, telegram):
             logging.warn(
                 f"message.reply_to_message.sender_chat {reply_to_message_sender_chat!r}: "
                     f"type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
-            )
-            continue
-        elif reply_to_message_sender_chat.get('username') not in CHANNEL_USERNAMES:
-            logging.warn(
-                f"message.reply_to_message.sender_chat {reply_to_message_sender_chat!r}: "
-                    f"username not in CHANNEL_USERNAMES {CHANNEL_USERNAMES!r}, Update {update['update_id']} skipped"
             )
             continue
 
