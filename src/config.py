@@ -12,4 +12,6 @@ USERNAME = Path('../info/username.txt').read_text().strip()  # TODO: можно 
 
 EVENT_TIMEOUT = 0.5
 
-ORDER_LIMIT = int(Path('../settings/order_limit.txt').read_text().strip())  # TODO: нужно уметь настраивать командой
+PRIVACY = Path('../settings/privacy.txt').read_text().strip().upper() == 'ENABLE'
+
+USER_ORDER_LIMIT = int(Path('../settings/user_order_limit.txt').read_text().strip())

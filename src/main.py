@@ -12,22 +12,27 @@ from log import LOG_BOT
 from telegram_api import TelegramAPI
 
 
-# TODO: уметь обновить active_post_id налету (можно отредактировать соответствующий пост)
-active_post_id = None
+GROUP_IDS = {-1001285375423, -1001686234152}
+CHANNEL_IDS = {-1001496858363, -1001761942943}
 
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
 parameters_of_get_updates = dict()
 
-search_bot_mention = re.compile(rf'\B@{config.USERNAME}\b').search
-match_dot_whitespace = re.compile(r'\.\s').match
+# TODO: уметь обновить active_post_id налету (можно отредактировать соответствующий пост)
+active_post_id = None
+user_order_limit = None
+count_order = count(start=1)
 
-count_message = count(start=1)
-order_counter = Counter()
+user_order_counter = Counter()
 
-GROUP_IDS = {-1001285375423, -1285375423, -1001686234152}
-CHANNEL_IDS = {-1001496858363, -1496858363, -1001761942943}
+search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
+match_dot_whitespace = re.compile(r'\.\s+').match
 
-# Chat = namedtuple('Chat', 'id type username')  # TODO: перечислить все поля
+# TODO: разобраться с тем, как с минимальными правами получать только нужные сообщения, а не все из группы
+#  администратор получается не нужен, но без администратора нельзя удалять сообщения...
+# https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+
+# FIXME: сейчас бот по сути умеет работать только с одним каналом (chat_id) и одним постом (active_post_id) из него
 
 
 def get_name(obj):
@@ -36,7 +41,7 @@ def get_name(obj):
 
 class Order(namedtuple(
         'Order',
-        ['chat_id', 'active_post_id', 'sender_id', 'sender_name', 'sender_username', 'counter', 'text'])):
+        ['chat_id', 'active_post_id', 'sender_id', 'sender_name', 'sender_username', 'count', 'text'])):
     __slots__ = ()
 
     @property
@@ -44,12 +49,11 @@ class Order(namedtuple(
         return self.chat_id, self.active_post_id, self.sender_id
 
     def __str__(self):
-        return f'By: {self.sender_name} ({self.sender_username})\n\n{self.counter:0>3}. {self.text}'
+        return f'От: {self.sender_name} ({self.sender_username})\n\n{self.count:0>3}. {self.text}'
 
 
 def process_updates(updates, telegram):
-    global active_post_id
-    global count_message
+    global active_post_id, user_order_limit, count_order
 
     logging = LOG_BOT.getChild('process_updates')
 
@@ -66,6 +70,7 @@ def process_updates(updates, telegram):
                 f"message.chat {message['chat']!r}: id not in GROUP_IDS {GROUP_IDS!r}, "
                     f"Update {update['update_id']} skipped"
             )
+            continue
 
         text = message.get('text')
         if not text:
@@ -82,16 +87,6 @@ def process_updates(updates, telegram):
         # найти активный пост
         forward_from_chat = message.get('forward_from_chat')
         if forward_from_chat:
-            # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
-            #  text: 'пост для выбора вашей песни на стриме @eljsbot'
-            # TODO: Обработать ситуацию когда из активного поста убрали упоминание бота
-            if not search_bot_mention(text):
-                logging.warn(
-                    f"message.text {text!r} doesn't mention bot {config.USERNAME!r}, "
-                        f"Update {update['update_id']} skipped"
-                )
-                continue
-
             if not sender_chat:
                 logging.warn(f"message {message!r}: no sender_chat, Update {update['update_id']} skipped")
                 continue
@@ -135,34 +130,43 @@ def process_updates(updates, telegram):
                 )
                 continue
 
-            active_post_id = message.get('forward_from_message_id')
-            if not active_post_id:
-                logging.warn(f"message {message!r}: no forward_from_message_id, Update {update['update_id']} skipped")
-                continue
-
-            logging.debug(f'Active channel post ID is {active_post_id!r}')
-
             forward_date = message.get('forward_date')
             if not forward_date:
                 logging.warn(f"message {message!r}: no forward_date, Update {update['update_id']} skipped")
                 continue
 
-            logging.info(f"Active channel post at {datetime.fromtimestamp(forward_date)} is \"{text}\"")
+            # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
+            #  text: 'пост для выбора вашей песни на стриме @eljsbot'
+            # TODO: Обработать ситуацию когда из активного поста убрали упоминание бота
+            bot_mention = search_bot_mention(text)
+            if not bot_mention:
+                logging.warn(
+                    f"message.text {text!r} doesn't mention bot {config.USERNAME!r}, "
+                        f"Update {update['update_id']} skipped"
+                )
+                continue
 
-            count_message = count(start=1)
-            logging.info(f'Counter of messages was reset')
+            active_post_id = message.get('forward_from_message_id')
+            if not active_post_id:
+                logging.warn(f"message {message!r}: no forward_from_message_id, Update {update['update_id']} skipped")
+                continue
+
+            logging.info(f"Active channel post at {datetime.fromtimestamp(forward_date)} is \"{text}\"")
+            logging.debug(f'Active channel post ID is {active_post_id!r}')
+
+            user_order_limit = int(bot_mention.group('limit') or config.USER_ORDER_LIMIT)
+            logging.info(f'User order limit is {user_order_limit!r}')
+
+            # очищать count_order необходимо только для нового поста
+            if 'edited_message' in update:
+                continue
+
+            count_order = count(start=1)
+            logging.info('Order counter was reset')
             continue
 
         if not active_post_id:
             logging.warn(f"no active_post_id {active_post_id!r}, Update {update['update_id']} skipped")
-            continue
-
-        # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
-        #  text: 'пост для выбора вашей песни на стриме @eljsbot'
-        dot_whitespace = match_dot_whitespace(text)
-        if not dot_whitespace:
-            logging.warn(
-                f"message.text {text!r} doesn't start with '. ', Update {update['update_id']} skipped")
             continue
 
         # TODO: вывести правила в ответ на новый активный пост
@@ -277,6 +281,14 @@ def process_updates(updates, telegram):
             )
             continue
 
+        # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
+        #  text: 'пост для выбора вашей песни на стриме @eljsbot'
+        dot_whitespace = match_dot_whitespace(text)
+        if not dot_whitespace:
+            logging.warn(
+                f"message.text {text!r} doesn't start with '. ', Update {update['update_id']} skipped")
+            continue
+
         logging.debug(f"message.text is \"{text}\", Update is {update['update_id']}")
 
         order = Order(
@@ -285,7 +297,7 @@ def process_updates(updates, telegram):
             sender_id=None,
             sender_name=None,
             sender_username=None,
-            counter=None,
+            count=None,
             text=(text[:dot_whitespace.start()] + text[dot_whitespace.end():]).strip(),
         )
 
@@ -302,7 +314,7 @@ def process_updates(updates, telegram):
             sender_username=sender_chat.get('username', from_.get('username', '')),
         )
 
-        if order_counter[order.key] >= config.ORDER_LIMIT:
+        if user_order_counter[order.key] >= user_order_limit:
             chat = (
                 message['chat'].get('title')
                 or get_name(message['chat'])
@@ -311,11 +323,11 @@ def process_updates(updates, telegram):
             )
             logging.warn(
                 f"The number of orders for {order.sender_name!r} ({chat!r}) has reached the limit: "
-                    f"{config.ORDER_LIMIT!r}, Update {update['update_id']} skipped"
+                    f"{user_order_limit!r}, Update {update['update_id']} skipped"
             )
             continue
 
-        order = order._replace(counter=next(count_message))
+        order = order._replace(count=next(count_order))
 
         sent_message = telegram.api_call(
             'sendMessage',
@@ -332,8 +344,8 @@ def process_updates(updates, telegram):
         if not sent_message:
             continue
 
-        order_counter.update([order.key])
-        logging.info(f'Order count: {order_counter[order.key]!r}, order.text is "{order.text}"')
+        user_order_counter.update([order.key])
+        logging.info(f'User order count: {user_order_counter[order.key]!r}, order.text is "{order.text}"')
 
         try:
             telegram.api_call('deleteMessage', dict(chat_id=message['chat']['id'], message_id=message['message_id']))
