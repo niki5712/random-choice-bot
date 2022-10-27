@@ -1,7 +1,8 @@
 import requests
 
-from common import SecretStr, BotException
 import config
+from common import SecretStr
+from exceptions import BotException
 from log import LOG_BOT
 
 

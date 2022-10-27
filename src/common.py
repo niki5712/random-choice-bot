@@ -1,7 +1,3 @@
-class BotException(Exception):
-    pass
-
-
 class SecretStr(str):
     def __new__(cls, value: [str, 'SecretStr']):
         if isinstance(value, SecretStr):
