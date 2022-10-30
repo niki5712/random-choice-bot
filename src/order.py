@@ -1,5 +1,4 @@
 import re
-from typing import Counter, Iterator
 
 import config
 from constant.chat import id as chat_id, type as chat_type
@@ -16,16 +15,23 @@ def get_name(obj):
     return ' '.join(filter(None, [obj.get('first_name'), obj.get('last_name')]))
 
 
+# TODO: придумать тип вроде структуры для активного поста
+# class ActivePost(NamedTuple):
+#     id: int
+#     user_order_counter: Counter
+#     user_order_limit: int
+#     count_order: Iterator[int]
+
+
 class Order:
     __slots__ = (
         'chat_id', 'active_post_id', 'message_id', 'sender_id', 'sender_name', 'sender_username', 'count', 'text')
 
     def __init__(
-            self, chat: dict, active_post_id: int, message_id: int,
-            from_: dict, sender_chat: dict, reply_to_message: dict, text: str,
-            user_order_counter: Counter, user_order_limit: int, count_order: Iterator[int]):
+            self, chat: dict, active_post: dict, message_id: int,
+            from_: dict, sender_chat: dict, reply_to_message: dict, text: str):
         self.chat_id = chat['id']
-        self.active_post_id = active_post_id
+        self.active_post_id = active_post['id']
         self.message_id = message_id
 
         # TODO: надо проверять???
@@ -87,14 +93,14 @@ class Order:
         self.sender_name = sender_chat.get('title', get_name(from_))
         self.sender_username = sender_chat.get('username', from_.get('username', ''))
 
-        if user_order_counter[self.key] >= user_order_limit:
+        if active_post['user_order_counter'][self.key] >= active_post['user_order_limit']:
             chat_name = chat.get('title') or get_name(chat) or chat.get('username') or chat['id']
             raise OrderException(
                 f"The number of orders for {self.sender_name!r} ({chat_name!r})"
-                    f" has reached the limit: {user_order_limit!r}"
+                    f" has reached the limit: {active_post['user_order_limit']!r}"
             )
 
-        self.count = next(count_order)
+        self.count = next(active_post['count_order'])
 
     def __repr__(self):
         return str(dict(
