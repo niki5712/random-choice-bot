@@ -15,13 +15,11 @@ from telegram_api import TelegramAPI
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
 parameters_of_get_updates = dict()
 
-# TODO: уметь обновить active_post_id налету (можно отредактировать соответствующий пост)
-active_post_id = None
-user_order_limit = None
-count_order = count(start=1)
-sender_to_orders_map = defaultdict(dict)
-
-user_order_counter = Counter()
+# TODO: уметь обновлять active_post_map налету (можно отредактировать соответствующий пост)
+# TODO: придумать тип вроде структуры для активного поста
+# ActivePost = namedtuple('ActivePost', ['id', 'user_order_counter', 'user_order_limit', 'count_order'])
+active_post_map = defaultdict(dict)
+sender_to_order_maps = defaultdict(dict)
 
 # TODO: Обновить документацию
 search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
@@ -31,16 +29,12 @@ match_dot_whitespace = re.compile(r'\.\s+').match
 #  администратор получается не нужен, но без администратора нельзя удалять сообщения...
 # https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
 
-# FIXME: сейчас бот по сути умеет работать только с одним каналом (chat_id) и одним постом (active_post_id) из него
-
 
 def get_name(obj):
     return ' '.join(filter(None, [obj.get('first_name'), obj.get('last_name')]))
 
 
 def process_updates(updates, telegram):
-    global active_post_id, user_order_limit, count_order
-
     logging = LOG_BOT.getChild('process_updates')
 
     for update in sorted(updates, key=lambda x: x['update_id']):
@@ -132,28 +126,31 @@ def process_updates(updates, telegram):
                 )
                 continue
 
-            active_post_id = message.get('forward_from_message_id')
-            if not active_post_id:
+            forward_from_message_id = message.get('forward_from_message_id')
+            if not forward_from_message_id:
                 logging.warning(
                     f"message {message!r}: no forward_from_message_id, Update {update['update_id']} skipped")
                 continue
 
             logging.info(f"Active channel post at {datetime.fromtimestamp(post_date)} is \"{text}\"")
-            logging.debug(f'Active channel post ID is {active_post_id!r}')
+            logging.debug(f'Active channel post ID is {forward_from_message_id!r}')
 
-            user_order_limit = int(bot_mention.group('limit') or config.USER_ORDER_LIMIT)
-            logging.info(f'User order limit is {user_order_limit!r}')
+            if 'edited_message' in update and forward_from_message_id in active_post_map:
+                active_post_map[forward_from_message_id]['user_order_limit'] = int(
+                    bot_mention.group('limit') or config.USER_ORDER_LIMIT)
+            else:
+                active_post_map[forward_from_message_id] = dict(
+                    id=forward_from_message_id,
+                    user_order_counter=Counter(),
+                    user_order_limit=int(bot_mention.group('limit') or config.USER_ORDER_LIMIT),
+                    count_order=count(start=1)
+                )
 
-            # очищать count_order необходимо только для нового поста
-            if 'edited_message' in update:
-                continue
-
-            count_order = count(start=1)
-            logging.info('Order counter was reset')
+            logging.info(f"User order limit is {active_post_map[forward_from_message_id]['user_order_limit']!r}")
             continue
 
-        if not active_post_id:
-            logging.warning(f"no active_post_id {active_post_id!r}, Update {update['update_id']} skipped")
+        if not active_post_map:
+            logging.warning(f"no active_post_map {active_post_map!r}, Update {update['update_id']} skipped")
             continue
 
         reply_to_message = message.get('reply_to_message')
@@ -209,26 +206,23 @@ def process_updates(updates, telegram):
         # найти заказы
         reply_to_message_forward_from_message_id = reply_to_message.get('forward_from_message_id')
         if reply_to_message_forward_from_message_id:
-            if reply_to_message_forward_from_message_id != active_post_id:
+            if reply_to_message_forward_from_message_id not in active_post_map:
                 logging.warning(
                     f"message.reply_to_message {reply_to_message!r}: "
-                        f"forward_from_message_id {reply_to_message_forward_from_message_id!r} != "
-                        f"active_post_id {active_post_id!r}, Update {update['update_id']} skipped"
+                        f"forward_from_message_id {reply_to_message_forward_from_message_id!r} not in "
+                        f"active_post_map {active_post_map!r}, Update {update['update_id']} skipped"
                 )
                 continue
 
             try:
                 order = Order(
                     message['chat'],
-                    active_post_id,
+                    active_post_map[reply_to_message_forward_from_message_id],
                     message['message_id'],  # TODO: sent_message['message_id']
                     from_,
                     sender_chat,
                     reply_to_message,
                     text,
-                    user_order_counter,
-                    user_order_limit,
-                    count_order,
                 )
             except OrderException as error:
                 logging.warning(f"{error}, Update {update['update_id']} skipped")
@@ -250,10 +244,14 @@ def process_updates(updates, telegram):
                 continue
 
             order.message_id = sent_message['message_id']
-            sender_to_orders_map[order.key][order.message_id] = order
+            sender_to_order_maps[order.key][order.message_id] = order
 
-            user_order_counter[order.key] += 1
-            logging.info(f'User order count: {user_order_counter[order.key]!r}, order.text is "{order.text}"')
+            active_post_map[reply_to_message_forward_from_message_id]['user_order_counter'][order.key] += 1
+            logging.info(
+                f"User order count: "
+                    f"{active_post_map[reply_to_message_forward_from_message_id]['user_order_counter'][order.key]!r}, "
+                    f"order.text is \"{order.text}\""
+            )
 
             try:
                 telegram.api_call(
@@ -279,13 +277,19 @@ def process_updates(updates, telegram):
             continue
 
         sender_id = sender_chat.get('id', from_['id'])
-        key = message['chat']['id'], active_post_id, sender_id
 
-        order = sender_to_orders_map[key].get(reply_to_message['message_id'])
-        if not order:
+        # TODO: упростить, можем ли взять в качестве id что-то кроме active_post_id?
+        # FIXME: id у активного поста может быть одинаковым в разным каналах?
+        for active_post_id in active_post_map:
+            key = message['chat']['id'], active_post_id, sender_id
+
+            order = sender_to_order_maps[key].get(reply_to_message['message_id'])
+            if order:
+                break
+        else:
             logging.warning(
                 f"message.reply_to_message.message_id {reply_to_message['message_id']!r} "
-                    f"is not found in order map {sender_to_orders_map[key]!r}, Update {update['update_id']} skipped"
+                    f"is not found in order maps {sender_to_order_maps!r}, Update {update['update_id']} skipped"
             )
             continue
 
