@@ -15,3 +15,5 @@ EVENT_TIMEOUT = 0.5
 PRIVACY = Path('../settings/privacy.txt').read_text().strip().upper() == 'ENABLE'
 
 USER_ORDER_LIMIT = int(Path('../settings/user_order_limit.txt').read_text().strip())
+
+COMMENT_PREFIX = '.'

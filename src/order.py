@@ -8,7 +8,6 @@ from exceptions import OrderException
 
 # TODO: Обновить документацию
 search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
-match_dot_whitespace = re.compile(r'\.\s+').match
 
 
 def get_name(obj):
@@ -47,9 +46,8 @@ class Order:
 
         # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
         #  text: 'пост для выбора вашей песни на стриме @eljsbot'
-        dot_whitespace = match_dot_whitespace(text)
-        if not dot_whitespace:
-            raise OrderException(f"message.text {text!r} doesn't start with '. '")
+        if text.startswith(config.COMMENT_PREFIX):
+            raise OrderException(f"message.text {text!r} starts with {config.COMMENT_PREFIX!r}")
 
         if reply_to_message_from['is_bot']:
             raise OrderException(f"message.reply_to_message.from {reply_to_message_from!r}: is bot")
@@ -84,10 +82,7 @@ class Order:
             raise OrderException(
                 f"message.reply_to_message.text {reply_to_message_text!r} doesn't mention bot {config.USERNAME!r}")
 
-        self.text = (text[:dot_whitespace.start()] + text[dot_whitespace.end():]).strip()
-        if not self.text:
-            raise OrderException(f"order.text is empty")
-
+        self.text = text
         # FIXME: sender_id: Chat.id (sender_chat.id) может случайно совпасть с User.id (from.id)?
         self.sender_id = sender_chat.get('id', from_['id'])
         self.sender_name = sender_chat.get('title', get_name(from_))

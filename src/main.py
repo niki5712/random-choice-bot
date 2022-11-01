@@ -23,11 +23,12 @@ sender_to_order_maps = defaultdict(dict)
 
 # TODO: Обновить документацию
 search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
-match_dot_whitespace = re.compile(r'\.\s+').match
 
 # TODO: разобраться с тем, как с минимальными правами получать только нужные сообщения, а не все из группы
 #  администратор получается не нужен, но без администратора нельзя удалять сообщения...
 # https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
+
+# TODO: проверить выдёргивание lan кабеля при работающем боте
 
 
 def get_name(obj):
@@ -183,10 +184,9 @@ def process_updates(updates, telegram):
 
         # TODO: понять как работать с entities: [{'length': 8, 'offset': 38, 'type': 'mention'}],
         #  text: 'пост для выбора вашей песни на стриме @eljsbot'
-        dot_whitespace = match_dot_whitespace(text)
-        if not dot_whitespace:
+        if text.startswith(config.COMMENT_PREFIX):
             logging.warning(
-                f"message.text {text!r} doesn't start with '. ', Update {update['update_id']} skipped")
+                f"message.text {text!r} starts with {config.COMMENT_PREFIX!r}, Update {update['update_id']} skipped")
             continue
 
         # TODO: вывести правила в ответ на новый активный пост
@@ -294,12 +294,7 @@ def process_updates(updates, telegram):
             continue
 
         # TODO: обновлять все поля, а не только text, т.к. пользователь может изменить sender_name, sender_username
-        new_text = (text[:dot_whitespace.start()] + text[dot_whitespace.end():]).strip()
-        if not new_text:
-            logging.warning(f"Edited order.text is empty, Update {update['update_id']} skipped")
-            continue
-
-        order.text = new_text
+        order.text = text
 
         edited_message = telegram.api_call(
             'editMessageText',
