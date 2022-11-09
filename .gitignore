@@ -1,0 +1,16 @@
+# base
+.*
+!.gitignore
+!.gitattributes
+
+*~
+*.pyc
+
+# rebase
+*.orig
+
+/log
+/venv
+
+# telegram client session
+/session
