@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 
 import config
 from constant.chat import id as chat_id, type as chat_type
@@ -16,7 +17,9 @@ def get_name(obj):
 
 # TODO: придумать тип вроде структуры для активного поста
 # class ActivePost(NamedTuple):
+#     channel_id: int
 #     id: int
+#     message_id: int
 #     user_order_counter: Counter
 #     user_order_limit: int
 #     count_order: Iterator[int]
@@ -24,17 +27,23 @@ def get_name(obj):
 
 class Order:
     __slots__ = (
-        'chat_id', 'active_post_id', 'message_id',
-        'sender_id', 'sender_chat_id', 'sender_name', 'sender_username',
+        'channel_id', 'active_post_id', 'group_id', 'message_id',
+        'sender_user_id', 'sender_chat_id', 'sender_name', 'sender_username', 'subscribed',
         'count', 'text',
     )
 
     def __init__(
             self, chat: dict, active_post: dict, message_id: int, reply_to_message: dict,
-            from_: dict, sender_chat: dict, text: str):
-        self.chat_id = chat['id']
+            from_: dict, sender_chat: dict, subscribed: Optional[bool], text: str):
+        self.group_id = chat['id']
         self.active_post_id = active_post['id']
+        self.sender_user_id = from_['id']
+        self.sender_chat_id = sender_chat.get('id')
+        self.sender_name = sender_chat.get('title', get_name(from_))
+        self.sender_username = sender_chat.get('username', from_.get('username', ''))
         self.message_id = message_id
+        self.subscribed = subscribed
+        self.text = text
 
         # TODO: надо проверять???
         # 'from' Optional. Sender of the message; empty for messages sent to channels. For backward compatibility,
@@ -72,6 +81,8 @@ class Order:
                     f"type != {chat_type.CHANNEL!r}"
             )
 
+        self.channel_id = reply_to_message_sender_chat['id']
+
         reply_to_message_forward_from_chat = reply_to_message.get('forward_from_chat')
         if not reply_to_message_forward_from_chat:
             raise OrderException(f"message.reply_to_message {reply_to_message!r}: no forward_from_chat")
@@ -85,13 +96,6 @@ class Order:
             raise OrderException(
                 f"message.reply_to_message.text {reply_to_message_text!r} doesn't mention bot {config.USERNAME!r}")
 
-        self.text = text
-        # FIXME: sender_id: Chat.id (sender_chat.id) может случайно совпасть с User.id (from.id)?
-        self.sender_id = sender_chat.get('id', from_['id'])
-        self.sender_chat_id = sender_chat.get('id')
-        self.sender_name = sender_chat.get('title', get_name(from_))
-        self.sender_username = sender_chat.get('username', from_.get('username', ''))
-
         if active_post['user_order_counter'][self.sender_key] >= active_post['user_order_limit']:
             chat_name = chat.get('title') or get_name(chat) or chat.get('username') or chat['id']
             raise OrderException(
@@ -104,6 +108,9 @@ class Order:
     def __repr__(self):
         return str(dict(
             sender_key=self.sender_key,
+            group_id=self.group_id,
+            message_id=self.message_id,
+            subscription=self.subscription,
             sender_name=self.sender_name,
             sender_username=self.sender_username,
             count=self.count,
@@ -124,7 +131,7 @@ class Order:
             # sender_url = f'tg://user?id={str(self.sender_chat_id).replace("-100", "", 1)}'
             # sender_url = f'tg://user?id={self.sender_chat_id}'
         else:
-            sender_url = f'tg://user?id={self.sender_id}'
+            sender_url = f'tg://user?id={self.sender_user_id}'
 
         def escape(text):
             return re.sub(
@@ -134,18 +141,31 @@ class Order:
             )
 
         return '''\
-{from_}[*{sender_name}*]({sender_url}){sender_mention}
+{subscription} [*{sender_name}*]({sender_url}){sender_mention}
 
-`{number}` {text}
-'''.format(
-    from_=escape('От: '),
-    sender_name=escape(self.sender_name),
-    sender_url=escape(sender_url),
-    sender_mention=escape(sender_mention),
-    number=escape(f'{self.count:0>3}.'),
-    text=escape(self.text),
-)
+`{number}` {text}'''.format(
+            subscription=escape(self.subscription),
+            sender_name=escape(self.sender_name),
+            sender_url=escape(sender_url),
+            sender_mention=escape(sender_mention),
+            number=escape(f'{self.count:0>3}.'),
+            text=escape(self.text),
+        )
+
+    @property
+    def subscription(self):
+        if self.subscribed is None:
+            return '❔'
+
+        return '👥' if self.subscribed else '👤'
 
     @property
     def sender_key(self):
-        return self.chat_id, self.active_post_id, self.sender_id
+        # FIXME: sender (chat/user) id: Chat.id (sender_chat.id) может случайно совпасть с User.id (from.id)?
+        return self.channel_id, self.active_post_id, (self.sender_chat_id or self.sender_user_id)
+
+    def update(self, from_: dict, sender_chat: dict, subscribed: Optional[bool], text: str):
+        self.sender_name = sender_chat.get('title', get_name(from_))
+        self.sender_username = sender_chat.get('username', from_.get('username', ''))
+        self.subscribed = subscribed
+        self.text = text

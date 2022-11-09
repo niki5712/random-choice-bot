@@ -10,7 +10,7 @@ REQUEST_TIMEOUT = 300
 
 USERNAME = Path('../info/username.txt').read_text().strip()  # TODO: можно получить из метода getMe
 
-EVENT_TIMEOUT = 0.5
+EVENT_TIMEOUT = 0.3
 
 PRIVACY = Path('../settings/privacy.txt').read_text().strip().upper() == 'ENABLE'
 
