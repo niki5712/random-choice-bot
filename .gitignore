@@ -1,0 +1,13 @@
+# base
+.*
+!.gitignore
+!.gitattributes
+
+*~
+*.pyc
+
+# rebase
+*.orig
+
+/log
+/venv
