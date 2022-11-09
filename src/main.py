@@ -12,19 +12,32 @@ from order import Order
 from telegram_api import TelegramAPI
 
 
+CHAT_MEMBER_STATUS_TO_SUBSCRIBED_MAP = dict(
+    creator=True,
+    administrator=True,
+    member=True,
+    restricted=True,
+    left=False,
+    kicked=False,
+)
+
+
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
-parameters_of_get_updates = dict(allowed_updates=[])
+parameters_of_get_updates = dict(allowed_updates=['message', 'edited_message', 'chat_member', 'my_chat_member'])
 
 # TODO: уметь обновлять active_post_map налету (можно отредактировать соответствующий пост)
 # TODO: придумать тип вроде структуры для активного поста
-# ActivePost = namedtuple('ActivePost', ['id', 'user_order_counter', 'user_order_limit', 'count_order'])
+# ActivePost = namedtuple(
+#     'ActivePost', ['channel_id', 'id', 'message_id', 'user_order_counter', 'user_order_limit', 'count_order'])
 active_post_map = defaultdict(dict)
 sender_to_order_maps = defaultdict(dict)
+
+channel_user_map = dict()
 
 # TODO: Обновить документацию
 search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
 
-# TODO: разобраться с тем, как с минимальными правами получать только нужные сообщения, а не все из группы
+# TODO: разобраться с тем, как с минимальными правами получать только нужные сообщения, а не все из группы.
 #  администратор получается не нужен, но без администратора нельзя удалять сообщения...
 # https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
 
@@ -40,6 +53,65 @@ def process_updates(updates, telegram):
 
     for update in sorted(updates, key=lambda x: x['update_id']):
         parameters_of_get_updates['offset'] = update['update_id'] + 1
+
+        # обновить статус участника в канале
+        chat_member = update.get('chat_member') or update.get('my_chat_member')
+        if chat_member:
+            if chat_member['chat']['type'] != chat_type.CHANNEL:
+                logging.warning(
+                    f"chat_member.chat {chat_member['chat']!r}: "
+                        f"type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
+                )
+                continue
+            elif chat_member['chat']['id'] not in chat_id.CHANNEL_IDS:
+                logging.warning(
+                    f"chat_member.chat {chat_member['chat']!r}: "
+                        f"id not in CHANNEL_IDS {chat_id.CHANNEL_IDS!r}, Update {update['update_id']} skipped"
+                )
+                continue
+
+            channel_user_key = chat_member['chat']['id'], chat_member['new_chat_member']['user']['id']
+            channel_user_map[channel_user_key] = chat_member['new_chat_member']
+
+            for channel_id, active_post_id in reversed(active_post_map):
+                if channel_id != chat_member['chat']['id']:
+                    continue
+
+                sender_key = channel_id, active_post_id, chat_member['new_chat_member']['user']['id']
+                for order in reversed(sender_to_order_maps[sender_key].values()):
+                    old_order = str(order)
+
+                    order.update(
+                        from_=chat_member['new_chat_member']['user'],
+                        sender_chat={},
+                        subscribed=CHAT_MEMBER_STATUS_TO_SUBSCRIBED_MAP.get(chat_member['new_chat_member']['status']),
+                        text=order.text,
+                    )
+
+                    if str(order) == old_order:
+                        logging.warning(f'No changes in the order "{order}"')
+                    else:
+                        try:
+                            edited_message = telegram.api_call(
+                                'editMessageText',
+                                dict(
+                                    chat_id=order.group_id,
+                                    message_id=order.message_id,
+                                    text=str(order),
+                                    parse_mode='MarkdownV2',
+                                    disable_web_page_preview=True,
+                                    # TODO: разобраться, что такое reply_markup
+                                )
+                            )
+                        except BotException:
+                            logging.error(f'Cannot edit the order "{order}" of the chat with id {order.group_id!r}')
+                            edited_message = {}
+
+                        if not edited_message:
+                            continue
+
+                        logging.info(f'Edited order is "{order}"')
+            continue
 
         message = update.get('message') or update.get('edited_message')
         if not message:
@@ -71,16 +143,16 @@ def process_updates(updates, telegram):
             if not sender_chat:
                 logging.warning(f"message {message!r}: no sender_chat, Update {update['update_id']} skipped")
                 continue
-            elif sender_chat['id'] not in chat_id.CHANNEL_IDS:
-                logging.warning(
-                    f"message.sender_chat {sender_chat!r}: "
-                        f"id not in CHANNEL_IDS {chat_id.CHANNEL_IDS!r}, Update {update['update_id']} skipped"
-                )
-                continue
             elif sender_chat['type'] != chat_type.CHANNEL:
                 logging.warning(
                     f"message.sender_chat {sender_chat!r}: "
                         f"type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
+                )
+                continue
+            elif sender_chat['id'] not in chat_id.CHANNEL_IDS:
+                logging.warning(
+                    f"message.sender_chat {sender_chat!r}: "
+                        f"id not in CHANNEL_IDS {chat_id.CHANNEL_IDS!r}, Update {update['update_id']} skipped"
                 )
                 continue
 
@@ -98,16 +170,16 @@ def process_updates(updates, telegram):
             #     )
             #     continue
 
-            if forward_from_chat['id'] not in chat_id.CHANNEL_IDS:
-                logging.warning(
-                    f"message.forward_from_chat {forward_from_chat!r}: "
-                        f"id not in CHANNEL_IDS {chat_id.CHANNEL_IDS!r}, Update {update['update_id']} skipped"
-                )
-                continue
-            elif forward_from_chat['type'] != chat_type.CHANNEL:
+            if forward_from_chat['type'] != chat_type.CHANNEL:
                 logging.warning(
                     f"message.forward_from_chat {forward_from_chat!r}: "
                         f"type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
+                )
+                continue
+            elif forward_from_chat['id'] not in chat_id.CHANNEL_IDS:
+                logging.warning(
+                    f"message.forward_from_chat {forward_from_chat!r}: "
+                        f"id not in CHANNEL_IDS {chat_id.CHANNEL_IDS!r}, Update {update['update_id']} skipped"
                 )
                 continue
 
@@ -136,18 +208,21 @@ def process_updates(updates, telegram):
             logging.info(f"Active channel post at {datetime.fromtimestamp(post_date)} is \"{text}\"")
             logging.debug(f'Active channel post ID is {forward_from_message_id!r}')
 
-            if 'edited_message' in update and forward_from_message_id in active_post_map:
-                active_post_map[forward_from_message_id]['user_order_limit'] = int(
+            post_key = forward_from_chat['id'], forward_from_message_id
+            if 'edited_message' in update and post_key in active_post_map:
+                active_post_map[post_key]['user_order_limit'] = int(
                     bot_mention.group('limit') or config.USER_ORDER_LIMIT)
             else:
-                active_post_map[forward_from_message_id] = dict(
+                active_post_map[post_key] = dict(
+                    channel_id=forward_from_chat['id'],
                     id=forward_from_message_id,
+                    message_id=message['message_id'],
                     user_order_counter=Counter(),
                     user_order_limit=int(bot_mention.group('limit') or config.USER_ORDER_LIMIT),
                     count_order=count(start=1)
                 )
 
-            logging.info(f"User order limit is {active_post_map[forward_from_message_id]['user_order_limit']!r}")
+            logging.info(f"User order limit is {active_post_map[post_key]['user_order_limit']!r}")
             continue
 
         if not active_post_map:
@@ -189,63 +264,84 @@ def process_updates(updates, telegram):
                 f"message.text {text!r} starts with {config.COMMENT_PREFIX!r}, Update {update['update_id']} skipped")
             continue
 
+        # TODO: создавать посты с помощью Inline Requests
+        # TODO: проверить корректность работы бота в условиях нестабильного интернета
+        # TODO: выводить число заказанных песен и сигн на OBS
+        # TODO: использовать custom_emoji?
         # TODO: уметь делать рассылку от имени бота участникам розыгрыша
-        # TODO: создавать пост с заказами с помощью inline keyboard button
         # TODO: ??? добавить возможность писать под постом от бота в случае ЧП
         # TODO: вывести правила в ответ на новый активный пост
         # TODO: обрабатывать команды /start, /stop, а также `Stop and block bot` и `Restart bot` в профиле бота
-        # Минимальные права: быть администратором связанной супергруппы и уметь удалять сообщения в ней
-        # vvv TODO: настроить задержку
         # TODO: информировать пользователя об ошибках через временные сообщения
         # TODO: в логе не хватает информации для какого поста характерна та или иная проблема
         #  и контекст лучше писать после описания проблемы, а не до
-        # TODO: проверить наличие подписки для добавления песни
-        # TODO: проверить наличие подписки для изменения песни
-        # TODO: проверить наличие подписки, если ваш билет счастливый
         # TODO: показать кнопку я тут, если Лёля нажала кнопку покажи себя на записи выигравшего
-        # TODO: добавить анимацию печати для ожидания удаления сообщения
+        # TODO: добавить анимацию печати если требуется подождать
         # TODO: по сути нету необходимости в зависимости от requests, можно обойтись встроенным функционалом
 
         # найти заказы
         reply_to_message_forward_from_message_id = reply_to_message.get('forward_from_message_id')
         if reply_to_message_forward_from_message_id:
-            if reply_to_message_forward_from_message_id not in active_post_map:
+            channel_id = reply_to_message['forward_from_chat']['id']
+            post_key = channel_id, reply_to_message_forward_from_message_id
+            if post_key not in active_post_map:
                 logging.warning(
                     f"message.reply_to_message {reply_to_message!r}: "
-                        f"forward_from_message_id {reply_to_message_forward_from_message_id!r} not in "
+                        f"forward_from_message_id {post_key!r} not in "
                         f"active_post_map {active_post_map!r}, Update {update['update_id']} skipped"
                 )
                 continue
 
             try:
+                if sender_chat:
+                    sender_member = dict(status='creator', user=from_)
+                else:
+                    channel_user_key = channel_id, from_['id']
+                    sender_member = channel_user_map.get(channel_user_key) or channel_user_map.setdefault(
+                        channel_user_key,
+                        telegram.api_call('getChatMember', dict(chat_id=channel_id, user_id=from_['id']))
+                    )
+            except BotException:
+                logging.error(
+                    f"Cannot get information about the member {from_!r} of "
+                        f"the chat {reply_to_message['forward_from_chat']!r}"
+                )
+                sender_member = {}
+
+            try:
                 order = Order(
                     chat=message['chat'],
-                    active_post=active_post_map[reply_to_message_forward_from_message_id],
+                    active_post=active_post_map[post_key],
                     message_id=message['message_id'],  # TODO: sent_message['message_id']
                     reply_to_message=reply_to_message,
                     from_=from_,
                     sender_chat=sender_chat,
+                    subscribed=CHAT_MEMBER_STATUS_TO_SUBSCRIBED_MAP.get(sender_member.get('status')),
                     text=text,
                 )
             except OrderException as error:
                 logging.warning(f"{error}, Update {update['update_id']} skipped")
                 continue
 
-            # TODO: попробовать copyMessage + caption, вместо sendMessage
-            # TODO: разобраться как работает ForceReply и для чего нужен
-            sent_message = telegram.api_call(
-                'sendMessage',
-                dict(
-                    chat_id=order.chat_id,
-                    text=str(order),
-                    parse_mode='MarkdownV2',
-                    disable_web_page_preview=True,
-                    disable_notification=True,
-                    protect_content=True,
-                    reply_to_message_id=reply_to_message['message_id'],
-                    # TODO: разобраться, что такое reply_markup
+            try:
+                # TODO: попробовать copyMessage + caption, вместо sendMessage
+                # TODO: разобраться как работает ForceReply и для чего нужен
+                sent_message = telegram.api_call(
+                    'sendMessage',
+                    dict(
+                        chat_id=order.group_id,
+                        text=str(order),
+                        parse_mode='MarkdownV2',
+                        disable_web_page_preview=True,
+                        disable_notification=True,
+                        protect_content=True,
+                        reply_to_message_id=reply_to_message['message_id'],
+                        # TODO: разобраться, что такое reply_markup
+                    )
                 )
-            )
+            except BotException:
+                logging.error(f'Cannot send the text message "{order}" of the chat with id {order.group_id!r}')
+                sent_message = {}
 
             if not sent_message:
                 continue
@@ -253,7 +349,7 @@ def process_updates(updates, telegram):
             order.message_id = sent_message['message_id']
             sender_to_order_maps[order.sender_key][order.message_id] = order
 
-            user_order_counter = active_post_map[reply_to_message_forward_from_message_id]['user_order_counter']
+            user_order_counter = active_post_map[post_key]['user_order_counter']
             user_order_counter[order.sender_key] += 1
             logging.info(f"User order count: {user_order_counter[order.sender_key]!r}, order.text is \"{order.text}\"")
 
@@ -261,8 +357,7 @@ def process_updates(updates, telegram):
                 telegram.api_call(
                     'deleteMessage', dict(chat_id=message['chat']['id'], message_id=message['message_id']))
             except BotException:
-                logging.error(f"Cannot delete message {text!r} from {order.sender_name!r}")
-                pass
+                logging.error(f"Cannot delete the message {text!r} from {order.sender_name!r}")
             continue
 
         # TODO: Обновить документацию
@@ -283,9 +378,8 @@ def process_updates(updates, telegram):
         sender_id = sender_chat.get('id', from_['id'])
 
         # TODO: упростить, можем ли взять в качестве id что-то кроме active_post_id?
-        # FIXME: id у активного поста может быть одинаковым в разным каналах?
-        for active_post_id in active_post_map:
-            sender_key = message['chat']['id'], active_post_id, sender_id
+        for channel_id, active_post_id in reversed(active_post_map):
+            sender_key = channel_id, active_post_id, sender_id
 
             order = sender_to_order_maps[sender_key].get(reply_to_message['message_id'])
             if order:
@@ -297,32 +391,46 @@ def process_updates(updates, telegram):
             )
             continue
 
-        # TODO: обновлять все поля, а не только text, т.к. пользователь может изменить sender_name, sender_username
-        order.text = text
+        old_order = str(order)
 
-        edited_message = telegram.api_call(
-            'editMessageText',
-            dict(
-                chat_id=order.chat_id,
-                message_id=order.message_id,
-                text=str(order),
-                parse_mode='MarkdownV2',
-                disable_web_page_preview=True,
-                # TODO: разобраться, что такое reply_markup
-            )
+        # TODO: пытаться получить статус if order.subscribed is None
+        order.update(
+            from_=from_,
+            sender_chat=sender_chat,
+            subscribed=order.subscribed,
+            text=text,
         )
 
-        if not edited_message:
-            continue
+        if str(order) == old_order:
+            logging.warning(f'No changes in the order "{order}"')
+        else:
+            try:
+                edited_message = telegram.api_call(
+                    'editMessageText',
+                    dict(
+                        chat_id=order.group_id,
+                        message_id=order.message_id,
+                        text=str(order),
+                        parse_mode='MarkdownV2',
+                        disable_web_page_preview=True,
+                        # TODO: разобраться, что такое reply_markup
+                    )
+                )
+            except BotException:
+                logging.error(
+                    f'Cannot edit the text message {reply_to_message!r} of the chat with id {order.group_id!r}')
+                edited_message = {}
 
-        logging.info(f'Edited order.text is "{order.text}"')
+            if not edited_message:
+                continue
+
+            logging.info(f'Edited order is "{order}"')
 
         try:
             telegram.api_call(
                 'deleteMessage', dict(chat_id=message['chat']['id'], message_id=message['message_id']))
         except BotException:
-            logging.error(f"Cannot delete message {text!r} from {order.sender_name!r}")
-            pass
+            logging.error(f"Cannot delete the message {text!r} from {order.sender_name!r}")
 
 
 def main():
@@ -330,9 +438,16 @@ def main():
     telegram = TelegramAPI()
     logging.debug(repr(telegram))
 
+    # Минимальные права: быть администратором канала и связанной супергруппы, уметь удалять сообщения в группе
+
     while True:
-        updates = telegram.api_call('getUpdates', parameters_of_get_updates)
-        logging.debug(f"Got {len(updates)} updates")
+        try:
+            updates = telegram.api_call('getUpdates', parameters_of_get_updates)
+        except BotException:
+            logging.error(f"Cannot get updates")
+            updates = []
+        else:
+            logging.debug(f"Got {len(updates)} updates")
 
         if not updates:
             sleep(config.EVENT_TIMEOUT)
