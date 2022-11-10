@@ -24,11 +24,14 @@ def get_name(obj):
 
 class Order:
     __slots__ = (
-        'chat_id', 'active_post_id', 'message_id', 'sender_id', 'sender_name', 'sender_username', 'count', 'text')
+        'chat_id', 'active_post_id', 'message_id',
+        'sender_id', 'sender_chat_id', 'sender_name', 'sender_username',
+        'count', 'text',
+    )
 
     def __init__(
-            self, chat: dict, active_post: dict, message_id: int,
-            from_: dict, sender_chat: dict, reply_to_message: dict, text: str):
+            self, chat: dict, active_post: dict, message_id: int, reply_to_message: dict,
+            from_: dict, sender_chat: dict, text: str):
         self.chat_id = chat['id']
         self.active_post_id = active_post['id']
         self.message_id = message_id
@@ -85,10 +88,11 @@ class Order:
         self.text = text
         # FIXME: sender_id: Chat.id (sender_chat.id) может случайно совпасть с User.id (from.id)?
         self.sender_id = sender_chat.get('id', from_['id'])
+        self.sender_chat_id = sender_chat.get('id')
         self.sender_name = sender_chat.get('title', get_name(from_))
         self.sender_username = sender_chat.get('username', from_.get('username', ''))
 
-        if active_post['user_order_counter'][self.key] >= active_post['user_order_limit']:
+        if active_post['user_order_counter'][self.sender_key] >= active_post['user_order_limit']:
             chat_name = chat.get('title') or get_name(chat) or chat.get('username') or chat['id']
             raise OrderException(
                 f"The number of orders for {self.sender_name!r} ({chat_name!r})"
@@ -99,7 +103,7 @@ class Order:
 
     def __repr__(self):
         return str(dict(
-            key=self.key,
+            sender_key=self.sender_key,
             sender_name=self.sender_name,
             sender_username=self.sender_username,
             count=self.count,
@@ -108,13 +112,40 @@ class Order:
 
     def __str__(self):
         if self.sender_username:
-            username = f' (@{self.sender_username})'
+            sender_mention = f' (@{self.sender_username})'
         else:
-            username = ''
+            sender_mention = ''
 
-        return f'От: {self.sender_name}{username}\n\n{self.count:0>3}. {self.text}'
+        # TODO: send a callback query to the bot via an inline button, чтобы ссылка точно работала
+        # Можно запретить упоминать себя через URL: Settings > Privacy and Security > Forwarded Messages
+        if self.sender_chat_id:
+            # TODO: Как сослаться на профиль чата?
+            sender_url = f'https://t.me/c/{str(self.sender_chat_id).replace("-100", "", 1)}'
+            # sender_url = f'tg://user?id={str(self.sender_chat_id).replace("-100", "", 1)}'
+            # sender_url = f'tg://user?id={self.sender_chat_id}'
+        else:
+            sender_url = f'tg://user?id={self.sender_id}'
 
-    # TODO: key -> sender_key
+        def escape(text):
+            return re.sub(
+                pattern=r'[\\_*[\]()~`>#+\-=|{}.!]',
+                repl=lambda match_object: rf'\{match_object.group()}',
+                string=text
+            )
+
+        return '''\
+{from_}[*{sender_name}*]({sender_url}){sender_mention}
+
+`{number}` {text}
+'''.format(
+    from_=escape('От: '),
+    sender_name=escape(self.sender_name),
+    sender_url=escape(sender_url),
+    sender_mention=escape(sender_mention),
+    number=escape(f'{self.count:0>3}.'),
+    text=escape(self.text),
+)
+
     @property
-    def key(self):
+    def sender_key(self):
         return self.chat_id, self.active_post_id, self.sender_id

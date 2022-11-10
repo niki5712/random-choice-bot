@@ -13,7 +13,7 @@ from telegram_api import TelegramAPI
 
 
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
-parameters_of_get_updates = dict()
+parameters_of_get_updates = dict(allowed_updates=[])
 
 # TODO: уметь обновлять active_post_map налету (можно отредактировать соответствующий пост)
 # TODO: придумать тип вроде структуры для активного поста
@@ -189,6 +189,9 @@ def process_updates(updates, telegram):
                 f"message.text {text!r} starts with {config.COMMENT_PREFIX!r}, Update {update['update_id']} skipped")
             continue
 
+        # TODO: уметь делать рассылку от имени бота участникам розыгрыша
+        # TODO: создавать пост с заказами с помощью inline keyboard button
+        # TODO: ??? добавить возможность писать под постом от бота в случае ЧП
         # TODO: вывести правила в ответ на новый активный пост
         # TODO: обрабатывать команды /start, /stop, а также `Stop and block bot` и `Restart bot` в профиле бота
         # Минимальные права: быть администратором связанной супергруппы и уметь удалять сообщения в ней
@@ -216,27 +219,31 @@ def process_updates(updates, telegram):
 
             try:
                 order = Order(
-                    message['chat'],
-                    active_post_map[reply_to_message_forward_from_message_id],
-                    message['message_id'],  # TODO: sent_message['message_id']
-                    from_,
-                    sender_chat,
-                    reply_to_message,
-                    text,
+                    chat=message['chat'],
+                    active_post=active_post_map[reply_to_message_forward_from_message_id],
+                    message_id=message['message_id'],  # TODO: sent_message['message_id']
+                    reply_to_message=reply_to_message,
+                    from_=from_,
+                    sender_chat=sender_chat,
+                    text=text,
                 )
             except OrderException as error:
                 logging.warning(f"{error}, Update {update['update_id']} skipped")
                 continue
 
+            # TODO: попробовать copyMessage + caption, вместо sendMessage
+            # TODO: разобраться как работает ForceReply и для чего нужен
             sent_message = telegram.api_call(
                 'sendMessage',
                 dict(
                     chat_id=order.chat_id,
                     text=str(order),
+                    parse_mode='MarkdownV2',
+                    disable_web_page_preview=True,
                     disable_notification=True,
-                    disable_web_page_preview=True,  # TODO: Что это?
+                    protect_content=True,
                     reply_to_message_id=reply_to_message['message_id'],
-                    # allow_sending_without_reply=True,
+                    # TODO: разобраться, что такое reply_markup
                 )
             )
 
@@ -244,14 +251,11 @@ def process_updates(updates, telegram):
                 continue
 
             order.message_id = sent_message['message_id']
-            sender_to_order_maps[order.key][order.message_id] = order
+            sender_to_order_maps[order.sender_key][order.message_id] = order
 
-            active_post_map[reply_to_message_forward_from_message_id]['user_order_counter'][order.key] += 1
-            logging.info(
-                f"User order count: "
-                    f"{active_post_map[reply_to_message_forward_from_message_id]['user_order_counter'][order.key]!r}, "
-                    f"order.text is \"{order.text}\""
-            )
+            user_order_counter = active_post_map[reply_to_message_forward_from_message_id]['user_order_counter']
+            user_order_counter[order.sender_key] += 1
+            logging.info(f"User order count: {user_order_counter[order.sender_key]!r}, order.text is \"{order.text}\"")
 
             try:
                 telegram.api_call(
@@ -281,9 +285,9 @@ def process_updates(updates, telegram):
         # TODO: упростить, можем ли взять в качестве id что-то кроме active_post_id?
         # FIXME: id у активного поста может быть одинаковым в разным каналах?
         for active_post_id in active_post_map:
-            key = message['chat']['id'], active_post_id, sender_id
+            sender_key = message['chat']['id'], active_post_id, sender_id
 
-            order = sender_to_order_maps[key].get(reply_to_message['message_id'])
+            order = sender_to_order_maps[sender_key].get(reply_to_message['message_id'])
             if order:
                 break
         else:
@@ -302,7 +306,9 @@ def process_updates(updates, telegram):
                 chat_id=order.chat_id,
                 message_id=order.message_id,
                 text=str(order),
-                disable_web_page_preview=True,  # TODO: Что это?
+                parse_mode='MarkdownV2',
+                disable_web_page_preview=True,
+                # TODO: разобраться, что такое reply_markup
             )
         )
 
