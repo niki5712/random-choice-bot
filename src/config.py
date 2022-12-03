@@ -8,12 +8,15 @@ AUTH_TOKEN = os.environ['JUKEBOX_BOT_AUTH_TOKEN']
 API_SERVER = os.environ.get('JUKEBOX_BOT_API_SERVER', 'https://api.telegram.org')
 REQUEST_TIMEOUT = 300
 
-USERNAME = Path('../info/username.txt').read_text().strip()  # TODO: можно получить из метода getMe
+USERNAME = Path('../info/username.txt').read_text(encoding='utf-8').strip()  # TODO: можно получить из метода getMe
 
 EVENT_TIMEOUT = 0.3
 
-PRIVACY = Path('../settings/privacy.txt').read_text().strip().upper() == 'ENABLE'
+PRIVACY = Path('../settings/privacy.txt').read_text(encoding='utf-8').strip().upper() == 'ENABLE'
 
-USER_ORDER_LIMIT = int(Path('../settings/user_order_limit.txt').read_text().strip())
+USER_ORDER_LIMIT = int(Path('../settings/user_order_limit.txt').read_text(encoding='utf-8').strip())
+
+ORDERTABLE_MARKDOWN_V_2 = Path('../settings/inline_query_result_ordertable.txt').read_text(encoding='utf-8').strip()
+FANSIGN_MARKDOWN_V_2 = Path('../settings/inline_query_result_fansign.txt').read_text(encoding='utf-8').strip()
 
 COMMENT_PREFIX = '.'
