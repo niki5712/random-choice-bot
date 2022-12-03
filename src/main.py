@@ -23,7 +23,8 @@ CHAT_MEMBER_STATUS_TO_SUBSCRIBED_MAP = dict(
 
 
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
-parameters_of_get_updates = dict(allowed_updates=['message', 'edited_message', 'chat_member', 'my_chat_member'])
+parameters_of_get_updates = dict(
+    allowed_updates=['message', 'edited_message', 'chat_member', 'my_chat_member', 'inline_query'])
 
 # TODO: уметь обновлять active_post_map налету (можно отредактировать соответствующий пост)
 # TODO: придумать тип вроде структуры для активного поста
@@ -113,6 +114,69 @@ def process_updates(updates, telegram):
                         logging.info(f'Edited order is "{order}"')
             continue
 
+        # предложить создать пост для розыгрыша
+        inline_query = update.get('inline_query')
+        if inline_query:
+            inline_query_chat_type = inline_query.get('chat_type')
+            if not inline_query_chat_type:
+                logging.warning(f"inline_query {inline_query!r}: no chat_type, Update {update['update_id']} skipped")
+                try:
+                    telegram.api_call('answerInlineQuery', dict(inline_query_id=inline_query['id'], results=[]))
+                except BotException:
+                    logging.error(f"Cannot send answer to the inline query {inline_query!r}")
+                continue
+            elif inline_query_chat_type != chat_type.CHANNEL:
+                logging.warning(
+                    f"inline_query {inline_query!r}: "
+                        f"chat_type != {chat_type.CHANNEL!r}, Update {update['update_id']} skipped"
+                )
+                try:
+                    telegram.api_call('answerInlineQuery', dict(inline_query_id=inline_query['id'], results=[]))
+                except BotException:
+                    logging.error(f"Cannot send answer to the inline query {inline_query!r}")
+                continue
+
+            # TODO: осуществлять поиск по inline_query['query']
+            # TODO: обеспечить обратную совместимость, разрешить отправлять произвольный текст после упоминания бота
+            # TODO: можно ли сделать, чтобы слайдер был горизонтальным? через картинки?
+            try:
+                telegram.api_call(
+                    'answerInlineQuery',
+                    dict(
+                        inline_query_id=inline_query['id'],
+                        results=[
+                            dict(
+                                type='article',
+                                id='ordertable',
+                                title='ordertable 🎵',
+                                input_message_content=dict(
+                                    message_text=config.ORDERTABLE_MARKDOWN_V_2,
+                                    parse_mode='MarkdownV2',
+                                    disable_web_page_preview=True,
+                                ),
+                                description='пост для розыгрыша песен',
+                            ),
+                            dict(
+                                type='article',
+                                id='fansign',
+                                title='fansign 📷',
+                                input_message_content=dict(
+                                    message_text=config.FANSIGN_MARKDOWN_V_2,
+                                    parse_mode='MarkdownV2',
+                                    disable_web_page_preview=True,
+                                ),
+                                description='пост для розыгрыша сигн',
+                            ),
+                        ],
+                        # The maximum amount of time in seconds that the result of
+                        # the inline query may be cached on the server. Defaults to 300.
+                        cache_time=1,
+                    )
+                )
+            except BotException:
+                logging.error(f"Cannot send answer to the inline query {inline_query!r}")
+            continue
+
         message = update.get('message') or update.get('edited_message')
         if not message:
             logging.warning(f"no message, Update {update} skipped")
@@ -198,6 +262,17 @@ def process_updates(updates, telegram):
                         f"Update {update['update_id']} skipped"
                 )
                 continue
+            # TODO: избавиться от необходимости упоминать бота явно, но оставить совместимость
+            # via_bot = message.get('via_bot')
+            # if not via_bot:
+            #     logging.warning(f"message {message!r}: no via_bot, Update {update['update_id']} skipped")
+            #     continue
+            # elif via_bot.get('username') != config.USERNAME:
+            #     logging.warning(
+            #         f"message.via_bot {via_bot!r}: username != {config.USERNAME!r}, "
+            #             f"Update {update['update_id']} skipped"
+            #     )
+            #     continue
 
             forward_from_message_id = message.get('forward_from_message_id')
             if not forward_from_message_id:
@@ -264,8 +339,14 @@ def process_updates(updates, telegram):
                 f"message.text {text!r} starts with {config.COMMENT_PREFIX!r}, Update {update['update_id']} skipped")
             continue
 
-        # TODO: создавать посты с помощью Inline Requests
         # TODO: проверить корректность работы бота в условиях нестабильного интернета
+        # TODO: можно ли отправлять системные сообщения ботом в канал, которые видят только админы, чтобы использовать
+        #  более удобные средства взаимодействия с ботом, например Inline Keyboard?
+        # TODO: что использовать для оставление заказов пользователем?
+        #  Inline Queries: https://core.telegram.org/bots/inline#spreading-virally
+        #  Inline Keyboard
+        # TODO: использовать Inline Keyboard для редактирования заказа пользователем
+        # TODO: использовать Inline Keyboard для удаления заказа администратором
         # TODO: выводить число заказанных песен и сигн на OBS
         # TODO: использовать custom_emoji?
         # TODO: уметь делать рассылку от имени бота участникам розыгрыша
@@ -438,7 +519,15 @@ def main():
     telegram = TelegramAPI()
     logging.debug(repr(telegram))
 
-    # Минимальные права: быть администратором канала и связанной супергруппы, уметь удалять сообщения в группе
+    # Минимальные права:
+    # - администратор связанной с каналом группы;
+    # - удаление сообщений в группе;
+    # - администратор канала;
+
+    # TODO: убедиться что обычный пользователь ничего не получает в результатах и ничего не может сделать
+    # TODO: похоже из-за inline_mode создаются также команды, доступные в связанной группе, вопрос для какого scope:
+    #  - /ordertable@jkbxbot
+    #  - /fansign@jkbxbot
 
     while True:
         try:
