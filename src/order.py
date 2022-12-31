@@ -160,7 +160,7 @@ class Order:
         if self.subscribed is None:
             return '❔'
 
-        return '👥' if self.subscribed else '👤'
+        return '☃️' if self.subscribed else '⛄'
 
     @property
     def sender_key(self):
@@ -178,7 +178,7 @@ class Order:
             inline_keyboard=[
                 [
                     dict(
-                        text='чтобы изменить, ответь на сообщение 👆',
+                        text='❄️ чтобы изменить, ответь на сообщение 👆',
                         url=f't.me/c/{get_short_id(self.group_id)}/{self.message_id}?thread={self.message_thread_id}',
                     ),
                 ],

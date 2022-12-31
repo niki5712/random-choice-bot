@@ -408,7 +408,7 @@ def process_updates(updates, telegram):
                     # TODO: автоматически удалять информационное сообщение через определённое время
                     text = '''\
 достигнут лимит сообщений
-ознакомься с [*правилами*](t.me/c/{chat_id}/{message_id}) 🧐
+ознакомься с [*правилами*](t.me/c/{chat_id}/{message_id}) 🕯️
 _*автоматическое сообщение*_'''.format(
                         chat_id=get_short_id(message['chat']['id']),
                         message_id=message.get('message_thread_id', reply_to_message['message_id']),
