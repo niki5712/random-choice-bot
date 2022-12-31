@@ -154,7 +154,7 @@ class Order:
         if self.subscribed is None:
             return '❔'
 
-        return '👥' if self.subscribed else '👤'
+        return '☃️' if self.subscribed else '⛄'
 
     @property
     def sender_key(self):
