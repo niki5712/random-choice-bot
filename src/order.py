@@ -2,23 +2,17 @@ import re
 from typing import Optional
 
 import config
+from common import get_name, get_short_id, search_bot_mention
 from constant.chat import id as chat_id, type as chat_type
-from constant.user import first_name
+from constant.user import first_name, id as user_id, username
 from exceptions import OrderException
-
-
-# TODO: Обновить документацию
-search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
-
-
-def get_name(obj):
-    return ' '.join(filter(None, [obj.get('first_name'), obj.get('last_name')]))
 
 
 # TODO: придумать тип вроде структуры для активного поста
 # class ActivePost(NamedTuple):
 #     channel_id: int
 #     id: int
+#     message_thread_id: int
 #     message_id: int
 #     user_order_counter: Counter
 #     user_order_limit: int
@@ -27,23 +21,33 @@ def get_name(obj):
 
 class Order:
     __slots__ = (
-        'channel_id', 'active_post_id', 'group_id', 'message_id',
+        'channel_id', 'active_post_id', 'group_id', 'message_thread_id', 'message_id',
         'sender_user_id', 'sender_chat_id', 'sender_name', 'sender_username', 'subscribed',
         'count', 'text',
     )
 
     def __init__(
-            self, chat: dict, active_post: dict, message_id: int, reply_to_message: dict,
-            from_: dict, sender_chat: dict, subscribed: Optional[bool], text: str):
+            self, chat: dict, active_post: dict, message_thread_id: Optional[int], message_id: int,
+            reply_to_message: dict, from_: dict, sender_chat: dict, subscribed: Optional[bool], text: str):
         self.group_id = chat['id']
         self.active_post_id = active_post['id']
         self.sender_user_id = from_['id']
         self.sender_chat_id = sender_chat.get('id')
         self.sender_name = sender_chat.get('title', get_name(from_))
-        self.sender_username = sender_chat.get('username', from_.get('username', ''))
+        self.message_thread_id = message_thread_id or reply_to_message['message_id']
         self.message_id = message_id
         self.subscribed = subscribed
         self.text = text
+
+        if sender_chat.get('username'):
+            self.sender_username = sender_chat['username']
+        elif from_.get('username') and not (
+                from_.get('is_bot', False) and from_['username'] in [username.CHANNEL_BOT, username.GROUP_ANONYMOUS_BOT]
+                or from_['id'] == user_id.TELEGRAM
+        ):
+            self.sender_username = from_['username']
+        else:
+            self.sender_username = ''
 
         # TODO: надо проверять???
         # 'from' Optional. Sender of the message; empty for messages sent to channels. For backward compatibility,
@@ -109,6 +113,7 @@ class Order:
         return str(dict(
             sender_key=self.sender_key,
             group_id=self.group_id,
+            message_thread_id=self.message_thread_id,
             message_id=self.message_id,
             subscription=self.subscription,
             sender_name=self.sender_name,
@@ -127,11 +132,9 @@ class Order:
         # Можно запретить упоминать себя через URL: Settings > Privacy and Security > Forwarded Messages
         if self.sender_chat_id:
             # TODO: Как сослаться на профиль чата?
-            sender_url = f'https://t.me/c/{str(self.sender_chat_id).replace("-100", "", 1)}'
-            # sender_url = f'tg://user?id={str(self.sender_chat_id).replace("-100", "", 1)}'
-            # sender_url = f'tg://user?id={self.sender_chat_id}'
+            sender_url = f't.me/c/{get_short_id(self.sender_chat_id)}'
         else:
-            sender_url = f'tg://user?id={self.sender_user_id}'
+            sender_url = f'tg:user?id={self.sender_user_id}'
 
         def escape(text):
             return re.sub(
@@ -169,3 +172,15 @@ class Order:
         self.sender_username = sender_chat.get('username', from_.get('username', ''))
         self.subscribed = subscribed
         self.text = text
+
+    def make_reply_markup(self) -> dict:
+        return dict(
+            inline_keyboard=[
+                [
+                    dict(
+                        text='чтобы изменить, ответь на сообщение 👆',
+                        url=f't.me/c/{get_short_id(self.group_id)}/{self.message_id}?thread={self.message_thread_id}',
+                    ),
+                ],
+            ]
+        )
