@@ -1,10 +1,10 @@
-import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from itertools import count
 from time import sleep
 
 import config
+from common import search_bot_mention
 from constant.chat import id as chat_id, type as chat_type
 from exceptions import BotException, OrderException
 from log import LOG_BOT
@@ -21,32 +21,19 @@ CHAT_MEMBER_STATUS_TO_SUBSCRIBED_MAP = dict(
     kicked=False,
 )
 
-
 # TODO: уметь обновить parameters_of_get_updates['offset'] налету
 parameters_of_get_updates = dict(
     allowed_updates=['message', 'edited_message', 'chat_member', 'my_chat_member', 'inline_query'])
 
 # TODO: уметь обновлять active_post_map налету (можно отредактировать соответствующий пост)
-# TODO: придумать тип вроде структуры для активного поста
-# ActivePost = namedtuple(
-#     'ActivePost', ['channel_id', 'id', 'message_id', 'user_order_counter', 'user_order_limit', 'count_order'])
 active_post_map = defaultdict(dict)
 sender_to_order_maps = defaultdict(dict)
 
 channel_user_map = dict()
 
-# TODO: Обновить документацию
-search_bot_mention = re.compile(rf'\B@{config.USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
-
 # TODO: разобраться с тем, как с минимальными правами получать только нужные сообщения, а не все из группы.
 #  администратор получается не нужен, но без администратора нельзя удалять сообщения...
 # https://core.telegram.org/bots/faq#what-messages-will-my-bot-get
-
-# TODO: проверить выдёргивание lan кабеля при работающем боте
-
-
-def get_name(obj):
-    return ' '.join(filter(None, [obj.get('first_name'), obj.get('last_name')]))
 
 
 def process_updates(updates, telegram):
@@ -101,7 +88,7 @@ def process_updates(updates, telegram):
                                     text=str(order),
                                     parse_mode='MarkdownV2',
                                     disable_web_page_preview=True,
-                                    # TODO: разобраться, что такое reply_markup
+                                    reply_markup=order.make_reply_markup(),
                                 )
                             )
                         except BotException:
@@ -393,6 +380,7 @@ def process_updates(updates, telegram):
                 order = Order(
                     chat=message['chat'],
                     active_post=active_post_map[post_key],
+                    message_thread_id=message.get('message_thread_id'),
                     message_id=message['message_id'],  # TODO: sent_message['message_id']
                     reply_to_message=reply_to_message,
                     from_=from_,
@@ -417,7 +405,6 @@ def process_updates(updates, telegram):
                         disable_notification=True,
                         protect_content=True,
                         reply_to_message_id=reply_to_message['message_id'],
-                        # TODO: разобраться, что такое reply_markup
                     )
                 )
             except BotException:
@@ -428,6 +415,17 @@ def process_updates(updates, telegram):
                 continue
 
             order.message_id = sent_message['message_id']
+            try:
+                telegram.api_call(
+                    'editMessageReplyMarkup',
+                    dict(chat_id=order.group_id, message_id=order.message_id, reply_markup=order.make_reply_markup())
+                )
+            except BotException:
+                logging.error(
+                    f'Cannot edit the reply markup of '
+                        f'the text message "{order}" of the chat with id {order.group_id!r}'
+                )
+
             sender_to_order_maps[order.sender_key][order.message_id] = order
 
             user_order_counter = active_post_map[post_key]['user_order_counter']
@@ -441,7 +439,6 @@ def process_updates(updates, telegram):
                 logging.error(f"Cannot delete the message {text!r} from {order.sender_name!r}")
             continue
 
-        # TODO: Обновить документацию
         # найти правки заказов
         if not reply_to_message_from['is_bot']:
             logging.warning(
@@ -494,7 +491,7 @@ def process_updates(updates, telegram):
                         text=str(order),
                         parse_mode='MarkdownV2',
                         disable_web_page_preview=True,
-                        # TODO: разобраться, что такое reply_markup
+                        reply_markup=order.make_reply_markup(),
                     )
                 )
             except BotException:
