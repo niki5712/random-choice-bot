@@ -4,3 +4,7 @@ class BotException(Exception):
 
 class OrderException(Exception):
     pass
+
+
+class OrderLimitIsReachedException(OrderException):
+    pass

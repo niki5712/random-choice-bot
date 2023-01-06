@@ -4,9 +4,9 @@ from itertools import count
 from time import sleep
 
 import config
-from common import search_bot_mention
+from common import get_short_id, search_bot_mention
 from constant.chat import id as chat_id, type as chat_type
-from exceptions import BotException, OrderException
+from exceptions import BotException, OrderException, OrderLimitIsReachedException
 from log import LOG_BOT
 from order import Order
 from telegram_api import TelegramAPI
@@ -336,6 +336,8 @@ def process_updates(updates, telegram):
         # TODO: использовать Inline Keyboard для удаления заказа администратором
         # TODO: выводить число заказанных песен и сигн на OBS
         # TODO: использовать custom_emoji?
+        #  https://core.telegram.org/api/links#custom-emoji-stickerset-links
+        #  https://core.telegram.org/api/custom-emoji
         # TODO: уметь делать рассылку от имени бота участникам розыгрыша
         # TODO: ??? добавить возможность писать под постом от бота в случае ЧП
         # TODO: вывести правила в ответ на новый активный пост
@@ -388,6 +390,32 @@ def process_updates(updates, telegram):
                     subscribed=CHAT_MEMBER_STATUS_TO_SUBSCRIBED_MAP.get(sender_member.get('status')),
                     text=text,
                 )
+            except OrderLimitIsReachedException as error:
+                try:
+                    # TODO: автоматически удалять информационное сообщение через определённое время
+                    text = '''\
+достигнут лимит сообщений
+ознакомься с [*правилами*](t.me/c/{chat_id}/{message_id}) 🧐
+_*автоматическое сообщение*_'''.format(
+                        chat_id=get_short_id(message['chat']['id']),
+                        message_id=message.get('message_thread_id', reply_to_message['message_id']),
+                    )
+                    telegram.api_call(
+                        'sendMessage',
+                        dict(
+                            chat_id=message['chat']['id'],
+                            text=text,
+                            parse_mode='MarkdownV2',
+                            disable_web_page_preview=True,
+                            disable_notification=True,
+                            protect_content=True,
+                            reply_to_message_id=message['message_id'],
+                        )
+                    )
+                except BotException:
+                    logging.error(f'Cannot send the text message "{text}" of the chat with id {message["chat"]["id"]!r}')
+                logging.warning(f"{error}, Update {update['update_id']} skipped")
+                continue
             except OrderException as error:
                 logging.warning(f"{error}, Update {update['update_id']} skipped")
                 continue
