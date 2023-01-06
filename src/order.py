@@ -5,7 +5,7 @@ import config
 from common import get_name, get_short_id, search_bot_mention
 from constant.chat import id as chat_id, type as chat_type
 from constant.user import first_name, id as user_id, username
-from exceptions import OrderException
+from exceptions import OrderException, OrderLimitIsReachedException
 
 
 # TODO: придумать тип вроде структуры для активного поста
@@ -102,7 +102,7 @@ class Order:
 
         if active_post['user_order_counter'][self.sender_key] >= active_post['user_order_limit']:
             chat_name = chat.get('title') or get_name(chat) or chat.get('username') or chat['id']
-            raise OrderException(
+            raise OrderLimitIsReachedException(
                 f"The number of orders for {self.sender_name!r} ({chat_name!r})"
                     f" has reached the limit: {active_post['user_order_limit']!r}"
             )
