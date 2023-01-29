@@ -1,7 +1,6 @@
 from collections import Counter, defaultdict
 from datetime import datetime
 from itertools import count
-from time import sleep
 
 import config
 from common import get_short_id, search_bot_mention
@@ -442,6 +441,12 @@ _*автоматическое сообщение*_'''.format(
             if not sent_message:
                 continue
 
+            try:
+                telegram.api_call(
+                    'deleteMessage', dict(chat_id=message['chat']['id'], message_id=message['message_id']))
+            except BotException:
+                logging.error(f"Cannot delete the message {text!r} from {order.sender_name!r}")
+
             order.message_id = sent_message['message_id']
             try:
                 telegram.api_call(
@@ -459,12 +464,6 @@ _*автоматическое сообщение*_'''.format(
             user_order_counter = active_post_map[post_key]['user_order_counter']
             user_order_counter[order.sender_key] += 1
             logging.info(f"User order count: {user_order_counter[order.sender_key]!r}, order.text is \"{order.text}\"")
-
-            try:
-                telegram.api_call(
-                    'deleteMessage', dict(chat_id=message['chat']['id'], message_id=message['message_id']))
-            except BotException:
-                logging.error(f"Cannot delete the message {text!r} from {order.sender_name!r}")
             continue
 
         # найти правки заказов
@@ -556,7 +555,7 @@ def main():
 
     while True:
         try:
-            updates = telegram.api_call('getUpdates', parameters_of_get_updates)
+            updates = telegram.api_call('getUpdates', parameters_of_get_updates, timeout=config.EVENT_TIMEOUT)
         except BotException:
             logging.error(f"Cannot get updates")
             updates = []
@@ -564,7 +563,6 @@ def main():
             logging.debug(f"Got {len(updates)} updates")
 
         if not updates:
-            sleep(config.EVENT_TIMEOUT)
             continue
 
         process_updates(updates, telegram)
