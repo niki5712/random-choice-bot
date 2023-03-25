@@ -104,7 +104,8 @@ class Order:
             chat_name = chat.get('title') or get_name(chat) or chat.get('username') or chat['id']
             raise OrderLimitIsReachedException(
                 f"The number of orders for {self.sender_name!r} ({chat_name!r})"
-                    f" has reached the limit: {active_post['user_order_limit']!r}"
+                    f" has reached the limit: {active_post['user_order_limit']!r}",
+                self.sender_key
             )
 
         self.count = next(active_post['count_order'])
@@ -172,15 +173,3 @@ class Order:
         self.sender_username = sender_chat.get('username', from_.get('username', ''))
         self.subscribed = subscribed
         self.text = text
-
-    def make_reply_markup(self) -> dict:
-        return dict(
-            inline_keyboard=[
-                [
-                    dict(
-                        text='чтобы изменить, ответь на сообщение 👆',
-                        url=f't.me/c/{get_short_id(self.group_id)}/{self.message_id}?thread={self.message_thread_id}',
-                    ),
-                ],
-            ]
-        )

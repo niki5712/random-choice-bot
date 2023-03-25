@@ -87,7 +87,6 @@ def process_updates(updates, telegram):
                                     text=str(order),
                                     parse_mode='MarkdownV2',
                                     disable_web_page_preview=True,
-                                    reply_markup=order.make_reply_markup(),
                                 )
                             )
                         except BotException:
@@ -122,6 +121,7 @@ def process_updates(updates, telegram):
                     logging.error(f"Cannot send answer to the inline query {inline_query!r}")
                 continue
 
+            # TODO: может приходится перезаходить в канал, чтобы увидеть InlineQueryResult из-за пустого запроса?
             # TODO: осуществлять поиск по inline_query['query']
             # TODO: обеспечить обратную совместимость, разрешить отправлять произвольный текст после упоминания бота
             # TODO: можно ли сделать, чтобы слайдер был горизонтальным? через картинки?
@@ -141,6 +141,7 @@ def process_updates(updates, telegram):
                                     disable_web_page_preview=True,
                                 ),
                                 description='пост для розыгрыша песен',
+                                thumbnail_url='https://e7.pngegg.com/pngimages/862/929/png-clipart-musical-instruments-bass-guitar-acoustic-guitar-string-instruments-musical-instruments-guitar-accessory-cuatro.png',
                             ),
                             dict(
                                 type='article',
@@ -152,11 +153,9 @@ def process_updates(updates, telegram):
                                     disable_web_page_preview=True,
                                 ),
                                 description='пост для розыгрыша сигн',
+                                thumbnail_url='https://e7.pngegg.com/pngimages/279/99/png-clipart-digital-cameras-graphy-video-cameras-drawing-camera-rectangle-photography.png',
                             ),
                         ],
-                        # The maximum amount of time in seconds that the result of
-                        # the inline query may be cached on the server. Defaults to 300.
-                        cache_time=1,
                     )
                 )
             except BotException:
@@ -390,15 +389,24 @@ def process_updates(updates, telegram):
                     text=text,
                 )
             except OrderLimitIsReachedException as error:
+                orders_formatted = ' '.join(
+                    '[*{number:0>3}*](t.me/c/{chat_id}/{message_id})'.format(
+                        number=order.count,
+                        chat_id=get_short_id(message['chat']['id']),
+                        message_id=order_message_id,
+                    )
+                    for order_message_id, order in sender_to_order_maps[error.sender_key].items()
+                )
+
                 try:
                     # TODO: автоматически удалять информационное сообщение через определённое время
                     text = '''\
-достигнут лимит сообщений
-ознакомься с [*правилами*](t.me/c/{chat_id}/{message_id}) 🧐
-_*автоматическое сообщение*_'''.format(
-                        chat_id=get_short_id(message['chat']['id']),
-                        message_id=message.get('message_thread_id', reply_to_message['message_id']),
-                    )
+достигнут лимит сообщений, но
+*можно _изменить_ существующие*,
+просто ответь на одно из них:
+{orders}
+_*автоматическое сообщение*_'''.format(orders=orders_formatted)
+
                     telegram.api_call(
                         'sendMessage',
                         dict(
@@ -412,7 +420,8 @@ _*автоматическое сообщение*_'''.format(
                         )
                     )
                 except BotException:
-                    logging.error(f'Cannot send the text message "{text}" of the chat with id {message["chat"]["id"]!r}')
+                    logging.error(
+                        f'Cannot send the text message "{text}" of the chat with id {message["chat"]["id"]!r}')
                 logging.warning(f"{error}, Update {update['update_id']} skipped")
                 continue
             except OrderException as error:
@@ -448,17 +457,6 @@ _*автоматическое сообщение*_'''.format(
                 logging.error(f"Cannot delete the message {text!r} from {order.sender_name!r}")
 
             order.message_id = sent_message['message_id']
-            try:
-                telegram.api_call(
-                    'editMessageReplyMarkup',
-                    dict(chat_id=order.group_id, message_id=order.message_id, reply_markup=order.make_reply_markup())
-                )
-            except BotException:
-                logging.error(
-                    f'Cannot edit the reply markup of '
-                        f'the text message "{order}" of the chat with id {order.group_id!r}'
-                )
-
             sender_to_order_maps[order.sender_key][order.message_id] = order
 
             user_order_counter = active_post_map[post_key]['user_order_counter']
@@ -518,7 +516,6 @@ _*автоматическое сообщение*_'''.format(
                         text=str(order),
                         parse_mode='MarkdownV2',
                         disable_web_page_preview=True,
-                        reply_markup=order.make_reply_markup(),
                     )
                 )
             except BotException:
