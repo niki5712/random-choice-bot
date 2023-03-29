@@ -20,7 +20,12 @@ PRIVACY = Path('../settings/privacy.txt').read_text(encoding='utf-8').strip().up
 
 USER_ORDER_LIMIT = int(Path('../settings/user_order_limit.txt').read_text(encoding='utf-8').strip())
 
-ORDERTABLE_MARKDOWN_V_2 = Path('../settings/inline_query_result_ordertable.txt').read_text(encoding='utf-8').strip()
-FANSIGN_MARKDOWN_V_2 = Path('../settings/inline_query_result_fansign.txt').read_text(encoding='utf-8').strip()
+ORDERTABLE_MARKDOWN_V2 = Path('../settings/inline_query_result_ordertable.txt').read_text(encoding='utf-8').strip()
+FANSIGN_MARKDOWN_V2 = Path('../settings/inline_query_result_fansign.txt').read_text(encoding='utf-8').strip()
+
+WELCOME_MESSAGE_MARKDOWN_V2 = Path('../settings/welcome_message.txt').read_text(encoding='utf-8').strip()
+WELCOME_MESSAGE_BUTTON_TEXT = Path('../settings/welcome_message_button_text.txt').read_text(encoding='utf-8').strip()
+WELCOME_MESSAGE_BUTTON_URL = Path('../settings/welcome_message_button_url.txt').read_text(encoding='utf-8').strip()
+WELCOME_MESSAGE_DISTANCE_LIMIT = 2
 
 COMMENT_PREFIX = '.'
