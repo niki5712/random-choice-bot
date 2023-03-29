@@ -20,7 +20,7 @@ class SecretStr(str):
 search_bot_mention = re.compile(rf'\B@{USERNAME}(?:\s+l(?P<limit>\d+))?\b').search
 
 
-def get_short_id(id_: int) -> int:
+def toggle_chat_id(id_: int) -> int:
     return -1_000_000_000_000 - id_
 
 

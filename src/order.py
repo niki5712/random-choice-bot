@@ -1,11 +1,11 @@
-import re
 from typing import Optional
 
 import config
-from common import get_name, get_short_id, search_bot_mention
+from common import get_name, search_bot_mention, toggle_chat_id
 from constant.chat import id as chat_id, type as chat_type
 from constant.user import first_name, id as user_id, username
 from exceptions import OrderException, OrderLimitIsReachedException
+from markdown_v2 import escape
 
 
 # TODO: придумать тип вроде структуры для активного поста
@@ -133,16 +133,9 @@ class Order:
         # Можно запретить упоминать себя через URL: Settings > Privacy and Security > Forwarded Messages
         if self.sender_chat_id:
             # TODO: Как сослаться на профиль чата?
-            sender_url = f't.me/c/{get_short_id(self.sender_chat_id)}'
+            sender_url = f't.me/c/{toggle_chat_id(self.sender_chat_id)}'
         else:
             sender_url = f'tg:user?id={self.sender_user_id}'
-
-        def escape(text):
-            return re.sub(
-                pattern=r'[\\_*[\]()~`>#+\-=|{}.!]',
-                repl=lambda match_object: rf'\{match_object.group()}',
-                string=text
-            )
 
         return '''\
 {subscription} [*{sender_name}*]({sender_url}){sender_mention}
