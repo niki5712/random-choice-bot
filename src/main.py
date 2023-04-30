@@ -2,7 +2,7 @@ import asyncio
 import mimetypes
 import os
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import count
 
 from telethon.sync import TelegramClient, errors, events, types
@@ -21,10 +21,9 @@ sender_to_order_maps = defaultdict(dict)
 
 channel_user_map = dict()
 
-last_group_message_map = defaultdict(dict)
-last_welcome_message_map = defaultdict(dict)
+last_welcome_message_map = dict()
 
-start_time = datetime.now()
+start_time = datetime.now(timezone.utc)
 
 lock = asyncio.Lock()
 
@@ -60,11 +59,17 @@ def add_handlers_for_draw(client):
     # обновить статус участника в канале
     @client.on(events.ChatAction(
         chats=chat_id.CHANNEL_IDS,
+        # FIXME: похоже после события event.user_joined обязательно следует event.user_added и будет дубль обработки
+        # FIXME: похоже добиться user_joined не получается в канале, только user_added, т.ч. дубля не будет
+        # FIXME: проверить как себя ведут user_left и user_kicked 👆🏻
         func=lambda event: any([event.user_joined, event.user_left, event.user_added, event.user_kicked]),
     ))
     async def channel_participant_handler(event):
         async with lock:
             logging = LOG_BOT.getChild('channel_participant_handler')
+
+            # FIXME:
+            print(f"niki channel_participant_handler event: {event}")
 
             subscribed = event.user_joined or event.user_added or not (event.user_left or event.user_kicked)
 
@@ -455,14 +460,74 @@ __**автоматическое сообщение**__'''
 
 
 def add_handlers_for_discussion(client):
-    async def group_message_handler(event):
+    # поприветствовать новичка в группе
+    @client.on(events.ChatAction(
+        chats=chat_id.GROUP_IDS,
+        # FIXME: похоже после события event.user_joined обязательно следует event.user_added
+        func=lambda event: event.user_added,
+    ))
+    async def group_participant_handler(event):
         async with lock:
-            last_group_message_map[event.chat_id] = event.message
+            logging = LOG_BOT.getChild('group_participant_handler')
 
-    # обновить last_group_message_map
-    group_message_event_kwargs = dict(chats=chat_id.GROUP_IDS)
-    client.add_event_handler(group_message_handler, events.NewMessage(**group_message_event_kwargs))
-    client.add_event_handler(group_message_handler, events.MessageEdited(**group_message_event_kwargs))
+            # FIXME:
+            print(f"niki group_participant_handler event: {event}")
+            # update_state = event.client.session.get_update_state(entity_id=event.chat_id)
+            # print(f"niki gevent.client.session.get_update_state(entity_id=event.chat_id): {update_state}")
+            # start_remote_update_state = start_remote_update_states.get(event.chat_id)
+            # if not start_remote_update_state:
+            #     return
+
+            # ignore the missed updates while the client was offline
+            # FIXME: разобраться как отбросить накопившиеся события
+            # https://core.telegram.org/api/updates#update-handling
+            # start_remote_update_states = dict(client.session.get_update_states())
+            # state = await self(functions.updates.GetStateRequest())
+            # ss, cs = self._message_box.session_state()
+            # if start_time > event.original_update.date:
+            # if event.original_update.pts < start_remote_update_state.pts:
+            # FIXME: у UpdateNewChannelMessage нету date, и в message тоже может не быть
+            from types import SimpleNamespace
+            event_date = getattr(
+                event.original_update,
+                'date',
+                getattr(getattr(event.original_update, 'message', SimpleNamespace(date=None)), 'date', None)
+            )
+            if event_date and event_date < start_time:
+                logging.warning(
+                    f"event_date {event_date} < start_time {start_time}, "
+                        f"Update {event} skipped"
+                )
+                return
+
+            try:
+                # TODO: можно ли отправить через объект message?
+                sent_message = await event.client.send_message(
+                    entity=event.chat_id,
+                    message=config.WELCOME_MESSAGE_MARKDOWN,
+                    link_preview=False,
+                    buttons=[[types.KeyboardButtonUrl(
+                        text=config.WELCOME_MESSAGE_BUTTON_TEXT,
+                        url=config.WELCOME_MESSAGE_BUTTON_URL,
+                    )]],
+                    silent=True,
+                )
+            except errors.RPCError as error:
+                logging.error(
+                    f'{error}. Cannot send message "{config.WELCOME_MESSAGE_MARKDOWN}": chat_id {event.chat_id}')
+                return
+
+            last_welcome_message = last_welcome_message_map.get(event.chat_id)
+            last_welcome_message_map[event.chat_id] = sent_message
+            logging.info(f"last_welcome_message is {sent_message}: chat_id {event.chat_id}")
+
+            if not last_welcome_message:
+                return
+
+            try:
+                await last_welcome_message.delete()
+            except errors.RPCError as error:
+                logging.error(f"{error}. Cannot delete message {last_welcome_message}")
 
 
 def main():
@@ -492,7 +557,17 @@ def main():
         add_handlers_for_draw(client)
         add_handlers_for_discussion(client)
 
-        client.run_until_disconnected()
+        try:
+            client.loop.run_until_complete(client.disconnected)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            for last_welcome_message in last_welcome_message_map.values():
+                try:
+                    last_welcome_message.delete()
+                except errors.RPCError as error:
+                    logging.error(f"{error}. Cannot delete message {last_welcome_message}")
+            client.disconnect()
 
 
 if __name__ == '__main__':

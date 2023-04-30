@@ -32,9 +32,8 @@ USER_ORDER_LIMIT = int(Path('../settings/user_order_limit.txt').read_text(encodi
 ORDERTABLE_MARKDOWN = Path('../settings/inline_query_result_ordertable.txt').read_text(encoding='utf-8').strip()
 FANSIGN_MARKDOWN = Path('../settings/inline_query_result_fansign.txt').read_text(encoding='utf-8').strip()
 
-WELCOME_MESSAGE_MARKDOWN_V2 = Path('../settings/welcome_message.txt').read_text(encoding='utf-8').strip()
+WELCOME_MESSAGE_MARKDOWN = Path('../settings/welcome_message.txt').read_text(encoding='utf-8').strip()
 WELCOME_MESSAGE_BUTTON_TEXT = Path('../settings/welcome_message_button_text.txt').read_text(encoding='utf-8').strip()
 WELCOME_MESSAGE_BUTTON_URL = Path('../settings/welcome_message_button_url.txt').read_text(encoding='utf-8').strip()
-WELCOME_MESSAGE_DISTANCE_LIMIT = 15
 
 COMMENT_PREFIX = '.'
