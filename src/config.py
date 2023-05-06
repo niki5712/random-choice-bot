@@ -14,7 +14,11 @@ LOGGING_LEVEL = 'DEBUG'
 
 AUTH_TOKEN = os.environ['JUKEBOX_BOT_AUTH_TOKEN']
 API_SERVER = os.environ.get('JUKEBOX_BOT_API_SERVER', 'https://api.telegram.org')
-# TODO: возможно лимит в 20 запросов в минуту обусловлен тем, что бот не логинется?
+# TODO: Чем обусловлен лимит в 20 запросов в минуту?
+#  - Тем, что бот не поддерживает /start и /stop?
+#  - Может это ограничение лишь на Россию и использование proxy решит проблему?
+#    https://docs.telethon.dev/en/stable/quick-references/faq.html#my-account-was-deleted-limited-when-using-the-library
+#    https://docs.telethon.dev/en/stable/basic/signing-in.html#signing-in
 REQUEST_RETRIES = 20
 REQUEST_TIMEOUT = 1.5
 CONNECTION_RETRIES = 24

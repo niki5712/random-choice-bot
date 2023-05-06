@@ -4,8 +4,9 @@ import os
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from itertools import count
+from typing import Any, Dict, Optional
 
-from telethon.sync import TelegramClient, errors, events, types
+from telethon.sync import TelegramClient, custom, errors, events, types
 
 import config
 from common import match_order, search_bot_mention
@@ -16,12 +17,12 @@ from type import MessageKey, Order, OrderSenderKey, SenderKey
 
 
 # TODO: уметь обновлять active_post_map налету (можно отредактировать соответствующий пост)
-active_post_map = defaultdict(dict)
-sender_to_order_maps = defaultdict(dict)
+active_post_map: Dict[MessageKey, Dict[str, Any]] = defaultdict(dict)
+sender_to_order_maps: Dict[OrderSenderKey, Dict[OrderSenderKey, Order]] = defaultdict(dict)
 
-channel_user_map = dict()
+channel_user_map: Dict[SenderKey, Optional[bool]] = dict()
 
-last_welcome_message_map = dict()
+last_welcome_message_map: Dict[int, custom.Message] = dict()
 
 start_time = datetime.now(timezone.utc)
 
@@ -59,10 +60,13 @@ def add_handlers_for_draw(client):
     # обновить статус участника в канале
     @client.on(events.ChatAction(
         chats=chat_id.CHANNEL_IDS,
-        # FIXME: похоже после события event.user_joined обязательно следует event.user_added и будет дубль обработки
-        # FIXME: похоже добиться user_joined не получается в канале, только user_added, т.ч. дубля не будет
-        # FIXME: проверить как себя ведут user_left и user_kicked 👆🏻
-        func=lambda event: any([event.user_joined, event.user_left, event.user_added, event.user_kicked]),
+        # при вступлении в канал происходит только событие event.user_added, а event.user_joined нет
+        # сам зашёл: user_added=True, user_joined=False, user_left=False, user_kicked=False
+        # сам вышел: user_added=False, user_joined=False, user_left=True, user_kicked=False
+        # FIXME: бан пользователя: никакого события
+        # FIXME: удаление пользователя из бана: user_added=False, user_joined=False, user_left=False, user_kicked=True
+        # FIXME: добавление забаненного пользователя: никакого события, но права появляются
+        # func=lambda event: any([event.user_added, event.user_left]),
     ))
     async def channel_participant_handler(event):
         async with lock:
@@ -70,6 +74,9 @@ def add_handlers_for_draw(client):
 
             # FIXME:
             print(f"niki channel_participant_handler event: {event}")
+
+            if not any([event.user_added, event.user_left]):
+                return
 
             subscribed = event.user_joined or event.user_added or not (event.user_left or event.user_kicked)
 
@@ -117,6 +124,9 @@ def add_handlers_for_draw(client):
                 except errors.RPCError as error:
                     logging.error(f"{error}. Cannot answer to inline query {event.query}")
                 return
+
+            # TODO: исключить пункт ordertable, он больше не актуален
+            # TODO: добавить пункт для уведомления о стриме + приглашение в чат первым комментом
 
             # TODO: может приходится перезаходить в канал, чтобы увидеть InlineQueryResult из-за пустого запроса?
             # TODO: осуществлять поиск по inline_query['query']
@@ -463,8 +473,9 @@ def add_handlers_for_discussion(client):
     # поприветствовать новичка в группе
     @client.on(events.ChatAction(
         chats=chat_id.GROUP_IDS,
-        # FIXME: похоже после события event.user_joined обязательно следует event.user_added
-        func=lambda event: event.user_added,
+        # после события event.user_joined всегда следует event.user_added
+        # FIXME: после добавления забаненного пользователя не прилетает никакого события, но права появляются
+        # func=lambda event: event.user_added,
     ))
     async def group_participant_handler(event):
         async with lock:
@@ -472,6 +483,10 @@ def add_handlers_for_discussion(client):
 
             # FIXME:
             print(f"niki group_participant_handler event: {event}")
+
+            if not event.user_added:
+                return
+
             # update_state = event.client.session.get_update_state(entity_id=event.chat_id)
             # print(f"niki gevent.client.session.get_update_state(entity_id=event.chat_id): {update_state}")
             # start_remote_update_state = start_remote_update_states.get(event.chat_id)
@@ -573,4 +588,5 @@ def main():
 if __name__ == '__main__':
     # TODO: переписать на python-telegram? https://github.com/alexander-akhmetov/python-telegram
     # TODO: переписать на pyrogram? https://github.com/pyrogram/pyrogram
+    # TODO: для оптимизации использовать пакет uvloop
     main()
