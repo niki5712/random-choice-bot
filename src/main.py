@@ -57,17 +57,6 @@ def add_handlers_for_draw(client):
     # TODO: показать кнопку я тут, если Лёля нажала кнопку покажи себя на записи выигравшего
     # TODO: добавить анимацию печати если требуется подождать
 
-    # обновить статус участника в канале
-    @client.on(events.ChatAction(
-        chats=chat_id.CHANNEL_IDS,
-        # при вступлении в канал происходит только событие event.user_added, а event.user_joined нет
-        # сам зашёл: user_added=True, user_joined=False, user_left=False, user_kicked=False
-        # сам вышел: user_added=False, user_joined=False, user_left=True, user_kicked=False
-        # FIXME: бан пользователя: никакого события
-        # FIXME: удаление пользователя из бана: user_added=False, user_joined=False, user_left=False, user_kicked=True
-        # FIXME: добавление забаненного пользователя: никакого события, но права появляются
-        # func=lambda event: any([event.user_added, event.user_left]),
-    ))
     async def channel_participant_handler(event):
         async with lock:
             logging = LOG_BOT.getChild('channel_participant_handler')
@@ -107,6 +96,52 @@ def add_handlers_for_draw(client):
                             continue
                         else:
                             logging.info(f'Edited order is "{order}"')
+
+    @client.on(events.Raw(
+        types=types.UpdateChannelParticipant,
+        func=lambda update: (
+            -(1_000_000_000_000 + update.channel_id) in chat_id.CHANNEL_IDS
+            and bool(update.new_participant) == bool(update.prev_participant)
+        ),
+    ))
+    async def ignored_update_channel_participant_handler(update):
+        async with lock:
+            logging = LOG_BOT.getChild('ignored_update_channel_participant_handler')
+
+            # FIXME: ignore promotions and demotions
+            print("niki update", update)
+
+            # TODO: разобраться какая должна быть логика
+            if not isinstance(update.prev_participant, (types.ChannelParticipant, types.ChannelParticipantBanned)):
+                return
+            if not isinstance(update.new_participant, (types.ChannelParticipant, types.ChannelParticipantBanned)):
+                return
+
+            event = events.ChatAction.Event(
+                where=types.PeerChannel(update.channel_id),
+                users=update.user_id,
+                added_by=update.actor_id if isinstance(update.new_participant, types.ChannelParticipant) else None,
+                kicked_by=update.actor_id if isinstance(update.new_participant, types.ChannelParticipantBanned) else None,
+            )
+            event.original_update = update
+            event._entities = update._entities
+            event._set_client(client)
+
+            logging.info(f"Built Update {event} from Raw Update {update}")
+
+        await channel_participant_handler(event)
+
+    # обновить статус участника в канале
+    client.add_event_handler(channel_participant_handler, events.ChatAction(
+        chats=chat_id.CHANNEL_IDS,
+        # при вступлении в канал происходит только событие event.user_added, а event.user_joined нет
+        # сам зашёл: user_added=True, user_joined=False, user_left=False, user_kicked=False
+        # сам вышел: user_added=False, user_joined=False, user_left=True, user_kicked=False
+        # FIXME: бан пользователя: никакого события
+        # FIXME: удаление пользователя из бана: user_added=False, user_joined=False, user_left=False, user_kicked=True
+        # FIXME: добавление забаненного пользователя: никакого события, но права появляются
+        # func=lambda event: any([event.user_added, event.user_left]),
+    ))
 
     # предложить создать пост для розыгрыша
     @client.on(events.InlineQuery)
