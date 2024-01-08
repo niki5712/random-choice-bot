@@ -681,4 +681,7 @@ if __name__ == '__main__':
     # TODO: переписать на python-telegram? https://github.com/alexander-akhmetov/python-telegram
     # TODO: переписать на Telethon? https://github.com/LonamiWebs/Telethon
     # TODO: переписать на pyrogram? https://github.com/pyrogram/pyrogram
-    main()
+    try:
+        main()
+    except Exception as error:  # noqa: disable=E722
+        exit(error)
